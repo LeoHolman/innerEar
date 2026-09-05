@@ -147,12 +147,21 @@ function midiToY(midi, height, centerMidi) {
   );
 }
 
-function foldMidiToReference(midi, referenceMidi) {
-  let bestMidi = midi;
-  let bestDistance = Math.abs(midi - referenceMidi);
+function foldMidiToReference(
+  midi,
+  referenceMidi,
+  minMidi = VOCAL_LOW_MIDI,
+  maxMidi = VOCAL_HIGH_MIDI,
+) {
+  const boundedMidi = clamp(midi, minMidi, maxMidi);
+  let bestMidi = boundedMidi;
+  let bestDistance = Math.abs(boundedMidi - referenceMidi);
 
   for (let octaveShift = -6; octaveShift <= 6; octaveShift += 1) {
     const candidate = midi + octaveShift * 12;
+    if (candidate < minMidi || candidate > maxMidi) {
+      continue;
+    }
     const candidateDistance = Math.abs(candidate - referenceMidi);
     if (candidateDistance < bestDistance) {
       bestMidi = candidate;
@@ -164,7 +173,7 @@ function foldMidiToReference(midi, referenceMidi) {
 }
 
 function stabilizeMidi(rawMidi, confidence = 0) {
-  const vocalMidi = clamp(rawMidi, VOCAL_LOW_MIDI - 12, VOCAL_HIGH_MIDI + 12);
+  const vocalMidi = clamp(rawMidi, VOCAL_LOW_MIDI, VOCAL_HIGH_MIDI);
 
   if (lastStableMidi == null) {
     return vocalMidi;
@@ -360,16 +369,42 @@ function autoCorrelate(buffer, sampleRate) {
   let bestValue = -Infinity;
   const localPeakThreshold = peakValue * 0.35;
 
-  for (let index = minLag; index < maxLag; index += 1) {
+  let firstValley = minLag;
+  for (let index = minLag + 1; index < maxLag; index += 1) {
+    if (
+      correlates[index] <= correlates[index - 1] &&
+      correlates[index] < correlates[index + 1]
+    ) {
+      firstValley = index;
+      break;
+    }
+  }
+
+  for (let index = firstValley + 1; index < maxLag; index += 1) {
     const current = correlates[index];
     if (
       current > correlates[index - 1] &&
       current >= correlates[index + 1] &&
-      current >= localPeakThreshold &&
-      current > bestValue
+      current >= localPeakThreshold
     ) {
       best = index;
       bestValue = current;
+      break;
+    }
+  }
+
+  if (best === -1) {
+    for (let index = minLag; index < maxLag; index += 1) {
+      const current = correlates[index];
+      if (
+        current > correlates[index - 1] &&
+        current >= correlates[index + 1] &&
+        current >= localPeakThreshold &&
+        current > bestValue
+      ) {
+        best = index;
+        bestValue = current;
+      }
     }
   }
 
@@ -379,6 +414,29 @@ function autoCorrelate(buffer, sampleRate) {
         bestValue = correlates[index];
         best = index;
       }
+    }
+  }
+
+  if (best > 0) {
+    const OCTAVE_SUBHARMONIC_RATIO = 0.84;
+    const FIFTH_SUBHARMONIC_RATIO = 0.88;
+
+    const octaveCandidate = best * 2;
+    if (
+      octaveCandidate <= maxLag &&
+      correlates[octaveCandidate] >= bestValue * OCTAVE_SUBHARMONIC_RATIO
+    ) {
+      best = octaveCandidate;
+      bestValue = correlates[octaveCandidate];
+    }
+
+    const fifthCandidate = best * 3;
+    if (
+      fifthCandidate <= maxLag &&
+      correlates[fifthCandidate] >= bestValue * FIFTH_SUBHARMONIC_RATIO
+    ) {
+      best = fifthCandidate;
+      bestValue = correlates[fifthCandidate];
     }
   }
 
