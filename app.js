@@ -20,6 +20,8 @@ const TOP_GAP = 34;
 const BOTTOM_GAP = 110;
 const SMOOTHING = 0.22;
 const MAX_PITCH_STEP = 7;
+const MIN_DETECT_HZ = 65;
+const MAX_DETECT_HZ = 1000;
 
 const canvas = document.getElementById('pianoRoll');
 const toggleButton = document.getElementById('toggleButton');
@@ -330,10 +332,20 @@ function autoCorrelate(buffer, sampleRate) {
     return { frequency: -1, confidence: 0, rms };
   }
 
-  const correlates = new Array(trimmed.length).fill(0);
+  const minLag = Math.max(2, Math.floor(sampleRate / MAX_DETECT_HZ));
+  const maxLag = Math.min(
+    trimmed.length - 2,
+    Math.ceil(sampleRate / MIN_DETECT_HZ),
+  );
+
+  if (maxLag <= minLag) {
+    return { frequency: -1, confidence: 0, rms };
+  }
+
+  const correlates = new Array(maxLag + 1).fill(0);
   let peakValue = -Infinity;
 
-  for (let offset = 0; offset < trimmed.length; offset += 1) {
+  for (let offset = 0; offset <= maxLag; offset += 1) {
     let sum = 0;
     for (let index = 0; index < trimmed.length - offset; index += 1) {
       sum += trimmed[index] * trimmed[index + offset];
@@ -344,32 +356,25 @@ function autoCorrelate(buffer, sampleRate) {
     }
   }
 
-  let shift = 0;
-  while (
-    shift < correlates.length - 1 &&
-    correlates[shift] > correlates[shift + 1]
-  ) {
-    shift += 1;
-  }
-
   let best = -1;
-  for (
-    let index = Math.max(2, shift + 1);
-    index < correlates.length - 1;
-    index += 1
-  ) {
+  let bestValue = -Infinity;
+  const localPeakThreshold = peakValue * 0.35;
+
+  for (let index = minLag; index < maxLag; index += 1) {
+    const current = correlates[index];
     if (
-      correlates[index] > correlates[index - 1] &&
-      correlates[index] >= correlates[index + 1]
+      current > correlates[index - 1] &&
+      current >= correlates[index + 1] &&
+      current >= localPeakThreshold &&
+      current > bestValue
     ) {
       best = index;
-      break;
+      bestValue = current;
     }
   }
 
   if (best === -1) {
-    let bestValue = -Infinity;
-    for (let index = shift; index < correlates.length; index += 1) {
+    for (let index = minLag; index <= maxLag; index += 1) {
       if (correlates[index] > bestValue) {
         bestValue = correlates[index];
         best = index;

@@ -42,27 +42,11 @@
     <main class="app-shell">
       <section class="hero-card">
         <div class="hero-copy">
-          <p class="eyebrow">Microphone pitch tracker</p>
-          <h1>Hear your note, see it land.</h1>
+          <h1>Visual Practice Tools</h1>
           <p class="lede">
             Start the mic, sing or hum, and watch your pitch trace a vertical
             piano roll in real time.
           </p>
-        </div>
-
-        <div class="hero-stats">
-          <article class="stat">
-            <span class="stat-label">Current note</span>
-            <strong id="noteName">--</strong>
-          </article>
-          <article class="stat">
-            <span class="stat-label">Frequency</span>
-            <strong id="frequency">--</strong>
-          </article>
-          <article class="stat">
-            <span class="stat-label">Cents</span>
-            <strong id="cents">--</strong>
-          </article>
         </div>
 
         <div class="controls-row">
@@ -85,19 +69,6 @@
             id="statusPill"
           >
             Mic idle
-          </div>
-        </div>
-
-        <div class="meter-card">
-          <div class="meter-header">
-            <span>Signal</span>
-            <span id="stabilityLabel">Waiting for input</span>
-          </div>
-          <div class="meter-track">
-            <div
-              class="meter-fill"
-              id="meterFill"
-            ></div>
           </div>
         </div>
       </section>
@@ -126,6 +97,36 @@
             >
               --
             </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="hero-card readout-card">
+        <div class="hero-stats">
+          <article class="stat">
+            <span class="stat-label">Current note</span>
+            <strong id="noteName">--</strong>
+          </article>
+          <article class="stat">
+            <span class="stat-label">Frequency</span>
+            <strong id="frequency">--</strong>
+          </article>
+          <article class="stat">
+            <span class="stat-label">Cents</span>
+            <strong id="cents">--</strong>
+          </article>
+        </div>
+
+        <div class="meter-card">
+          <div class="meter-header">
+            <span>Signal</span>
+            <span id="stabilityLabel">Waiting for input</span>
+          </div>
+          <div class="meter-track">
+            <div
+              class="meter-fill"
+              id="meterFill"
+            ></div>
           </div>
         </div>
       </section>
