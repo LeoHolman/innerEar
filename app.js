@@ -53,7 +53,9 @@ const exerciseMemoryDelayField = document.getElementById(
   'exerciseMemoryDelayField',
 );
 const exerciseScaleType = document.getElementById('exerciseScaleType');
-const exerciseScaleTypeField = document.getElementById('exerciseScaleTypeField');
+const exerciseScaleTypeField = document.getElementById(
+  'exerciseScaleTypeField',
+);
 const exerciseStartButton = document.getElementById('exerciseStartButton');
 const exerciseDetailsToggle = document.getElementById('exerciseDetailsToggle');
 const exerciseFeedback = document.getElementById('exerciseFeedback');
@@ -526,7 +528,10 @@ function updateExercisePresetUi() {
     exerciseScaleTypeField.hidden = !isScaleMatch;
   }
 
-  if (exerciseScaleType && exerciseScaleType.value !== exerciseState.scaleType) {
+  if (
+    exerciseScaleType &&
+    exerciseScaleType.value !== exerciseState.scaleType
+  ) {
     exerciseScaleType.value = exerciseState.scaleType;
   }
 
@@ -998,7 +1003,10 @@ function updateScaleExercise(sample) {
     setExerciseAttemptText(
       `Degree ${currentIndex + 1}/${exerciseState.scaleNotes.length}: ${midiToNoteName(targetMidi)} (${(heldMs / 1000).toFixed(2)}s)`,
     );
-    setExerciseFeedback('Close. Keep this degree centered and steady.', 'neutral');
+    setExerciseFeedback(
+      'Close. Keep this degree centered and steady.',
+      'neutral',
+    );
     return;
   }
 
@@ -1344,7 +1352,11 @@ function getExerciseViewportBoundsIfActive() {
     return null;
   }
 
-  const low = clamp(exerciseState.rangeLowMidi, VOCAL_LOW_MIDI, VOCAL_HIGH_MIDI);
+  const low = clamp(
+    exerciseState.rangeLowMidi,
+    VOCAL_LOW_MIDI,
+    VOCAL_HIGH_MIDI,
+  );
   const high = clamp(
     exerciseState.rangeHighMidi,
     VOCAL_LOW_MIDI,
