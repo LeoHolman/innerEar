@@ -42,15 +42,26 @@ const referenceVolume = document.getElementById('referenceVolume');
 const referenceVolumeValue = document.getElementById('referenceVolumeValue');
 const exercisePanel = document.getElementById('exercisePanel');
 const exerciseDetails = document.getElementById('exerciseDetails');
+const exerciseType = document.getElementById('exerciseType');
+const exerciseBadge = document.getElementById('exerciseBadge');
+const exerciseTitle = document.getElementById('exerciseTitle');
+const exerciseDescription = document.getElementById('exerciseDescription');
 const exerciseLowNote = document.getElementById('exerciseLowNote');
 const exerciseHighNote = document.getElementById('exerciseHighNote');
+const exerciseMemoryDelay = document.getElementById('exerciseMemoryDelay');
+const exerciseMemoryDelayField = document.getElementById(
+  'exerciseMemoryDelayField',
+);
 const exerciseStartButton = document.getElementById('exerciseStartButton');
-const exerciseReplayButton = document.getElementById('exerciseReplayButton');
 const exerciseDetailsToggle = document.getElementById('exerciseDetailsToggle');
 const exerciseFeedback = document.getElementById('exerciseFeedback');
 const exerciseReveal = document.getElementById('exerciseReveal');
 const exerciseProgressFill = document.getElementById('exerciseProgressFill');
 const exerciseAttemptLabel = document.getElementById('exerciseAttemptLabel');
+const exercisePhaseLabel = document.getElementById('exercisePhaseLabel');
+const exerciseMemoryCountdown = document.getElementById(
+  'exerciseMemoryCountdown',
+);
 const exerciseCurrentNote = document.getElementById('exerciseCurrentNote');
 const exerciseCurrentFrequency = document.getElementById(
   'exerciseCurrentFrequency',
@@ -91,14 +102,41 @@ const EXERCISE_MATCH_TOLERANCE_CENTS = 35;
 const EXERCISE_MATCH_TOLERANCE = EXERCISE_MATCH_TOLERANCE_CENTS / 100;
 const EXERCISE_HOLD_GRACE_MS = 180;
 const EXERCISE_MIN_CONFIDENCE = 0.72;
+const EXERCISE_MEMORY_MIN_DELAY_SECONDS = 1;
+const EXERCISE_MEMORY_MAX_DELAY_SECONDS = 100;
+const EXERCISE_MEMORY_COUNTDOWN_SECONDS = 3;
+const EXERCISE_MEMORY_ATTEMPT_WINDOW_MS = 3000;
+
+const EXERCISE_PRESETS = {
+  'pitch-matching': {
+    badge: 'Preset exercise',
+    title: 'Pitch Matching',
+    description:
+      'Choose the comfortable range you want to practice in, then sing the prompt tone back without seeing the note name first.',
+    startLabel: 'Start pitch matching',
+  },
+  'pitch-memory': {
+    badge: 'Memory exercise',
+    title: 'Pitch Memory',
+    description:
+      'Hear a target tone, hold it in memory, then reproduce it after a timed countdown.',
+    startLabel: 'Start pitch memory',
+  },
+};
 
 const exerciseState = {
   panelOpen: false,
   selectedExercise: 'pitch-matching',
   active: false,
+  phase: 'idle',
   targetMidi: null,
   rangeLowMidi: 48,
   rangeHighMidi: 60,
+  memoryDelaySeconds: 8,
+  memoryTimerId: null,
+  memoryCountdownIntervalId: null,
+  memoryCountdownHideTimerId: null,
+  memoryEvaluationEndTime: null,
   holdStartTime: null,
   lastInTuneTime: null,
   attemptStartedAt: null,
@@ -301,6 +339,14 @@ function setExerciseAttemptText(message) {
   exerciseAttemptLabel.textContent = message;
 }
 
+function setExercisePhaseText(message) {
+  if (!exercisePhaseLabel) {
+    return;
+  }
+
+  exercisePhaseLabel.textContent = message;
+}
+
 function syncExerciseRangeFromInputs() {
   if (!exerciseLowNote || !exerciseHighNote) {
     return;
@@ -323,26 +369,114 @@ function syncExerciseRangeFromInputs() {
 
 function resetExerciseAttemptState() {
   exerciseState.active = false;
+  exerciseState.phase = 'idle';
   exerciseState.targetMidi = null;
+  exerciseState.memoryEvaluationEndTime = null;
   exerciseState.holdStartTime = null;
   exerciseState.lastInTuneTime = null;
   exerciseState.attemptStartedAt = null;
   exerciseState.lastDetectedSample = null;
 }
 
-function updateExerciseButtons() {
-  if (exerciseReplayButton) {
-    exerciseReplayButton.disabled = exerciseState.targetMidi == null;
+function clearExerciseTimers() {
+  if (exerciseState.memoryTimerId != null) {
+    window.clearTimeout(exerciseState.memoryTimerId);
+    exerciseState.memoryTimerId = null;
   }
+
+  if (exerciseState.memoryCountdownIntervalId != null) {
+    window.clearInterval(exerciseState.memoryCountdownIntervalId);
+    exerciseState.memoryCountdownIntervalId = null;
+  }
+
+  if (exerciseState.memoryCountdownHideTimerId != null) {
+    window.clearTimeout(exerciseState.memoryCountdownHideTimerId);
+    exerciseState.memoryCountdownHideTimerId = null;
+  }
+}
+
+function setExerciseCountdownText(message) {
+  if (!exerciseMemoryCountdown) {
+    return;
+  }
+
+  exerciseMemoryCountdown.textContent = message;
+}
+
+function syncExerciseMemoryDelayFromInput() {
+  if (!exerciseMemoryDelay) {
+    return;
+  }
+
+  const parsed = Number(exerciseMemoryDelay.value);
+  const normalized = Math.round(
+    clamp(
+      Number.isFinite(parsed)
+        ? parsed
+        : EXERCISE_MEMORY_MIN_DELAY_SECONDS,
+      EXERCISE_MEMORY_MIN_DELAY_SECONDS,
+      EXERCISE_MEMORY_MAX_DELAY_SECONDS,
+    ),
+  );
+
+  exerciseState.memoryDelaySeconds = normalized;
+  exerciseMemoryDelay.value = String(normalized);
+}
+
+function updateExercisePresetUi() {
+  const preset =
+    EXERCISE_PRESETS[exerciseState.selectedExercise] ||
+    EXERCISE_PRESETS['pitch-matching'];
+  const isPitchMemory = exerciseState.selectedExercise === 'pitch-memory';
+
+  if (exerciseType && exerciseType.value !== exerciseState.selectedExercise) {
+    exerciseType.value = exerciseState.selectedExercise;
+  }
+
+  if (exerciseBadge) {
+    exerciseBadge.textContent = preset.badge;
+  }
+
+  if (exerciseTitle) {
+    exerciseTitle.textContent = preset.title;
+  }
+
+  if (exerciseDescription) {
+    exerciseDescription.textContent = preset.description;
+  }
+
+  if (exerciseStartButton) {
+    exerciseStartButton.textContent = preset.startLabel;
+  }
+
+  if (exerciseMemoryDelayField) {
+    exerciseMemoryDelayField.hidden = !isPitchMemory;
+  }
+
+  if (!isPitchMemory) {
+    setExerciseCountdownText('--');
+  }
+}
+
+function setSelectedExercise(exerciseId) {
+  const normalized = EXERCISE_PRESETS[exerciseId]
+    ? exerciseId
+    : 'pitch-matching';
+  exerciseState.selectedExercise = normalized;
+  clearExerciseTimers();
+  resetExerciseAttemptState();
+  updateExercisePresetUi();
+  resetExerciseUi();
 }
 
 function resetExerciseUi() {
   setExerciseAttemptText('Idle');
+  setExercisePhaseText('Idle');
   setExerciseFeedback('Select your range and start when you are ready.');
   setExerciseRevealText('--');
   setExerciseProgress(0);
+  setExerciseCountdownText('--');
   setExerciseLiveReadout(null);
-  updateExerciseButtons();
 }
 
 function chooseExerciseTargetMidi() {
@@ -444,15 +578,18 @@ async function startPitchMatchingExercise() {
     return;
   }
 
+  clearExerciseTimers();
   resetExerciseAttemptState();
   exerciseState.targetMidi = chooseExerciseTargetMidi();
   exerciseState.active = true;
+  exerciseState.phase = 'matching-listening';
   exerciseState.attemptStartedAt = performance.now();
   exerciseState.lastResult = null;
   exerciseState.lastDetectedSample = null;
   exerciseState.lastInTuneTime = null;
 
   setExerciseAttemptText('Listening for a match');
+  setExercisePhaseText('Prompt + matching');
   setExerciseFeedback(
     `Match the hidden tone within +/-${EXERCISE_MATCH_TOLERANCE_CENTS} cents and hold it for 1 second.`,
     'neutral',
@@ -460,10 +597,159 @@ async function startPitchMatchingExercise() {
   setExerciseRevealText('Hidden');
   setExerciseProgress(0);
   setExerciseLiveReadout(null);
-  updateExerciseButtons();
 
   setStatus('Exercise prompt playing', true);
   await replayExerciseTone();
+}
+
+function finalizePitchMemoryAttempt(success) {
+  if (exerciseState.targetMidi == null) {
+    return;
+  }
+
+  const revealedNote = midiToNoteName(exerciseState.targetMidi);
+  const detectedSample = exerciseState.lastDetectedSample;
+  const attemptSummary = detectedSample
+    ? ` Your closest stable note was ${midiToNoteName(detectedSample.midi)} at ${detectedSample.frequency.toFixed(1)} Hz.`
+    : ' No stable sung note was detected during the one-second sing window.';
+  const message = success
+    ? `Success. You recalled ${revealedNote} and held it for 1 second.`
+    : `Try again. The target note was ${revealedNote}.${attemptSummary}`;
+
+  clearExerciseTimers();
+  resetExerciseAttemptState();
+  setExerciseProgress(success ? 1 : 0);
+  setExerciseAttemptText(success ? 'Matched from memory' : 'Memory miss');
+  setExercisePhaseText('Complete');
+  setExerciseFeedback(message, success ? 'success' : 'warning');
+  setExerciseRevealText(revealedNote);
+  setExerciseCountdownText('--');
+  setStatus(success ? 'Exercise success' : 'Exercise try again', true);
+}
+
+function beginPitchMemorySingWindow() {
+  if (
+    !exerciseState.active ||
+    exerciseState.selectedExercise !== 'pitch-memory' ||
+    exerciseState.targetMidi == null
+  ) {
+    return;
+  }
+
+  exerciseState.phase = 'memory-sing';
+  exerciseState.holdStartTime = null;
+  exerciseState.lastInTuneTime = null;
+  exerciseState.lastDetectedSample = null;
+  exerciseState.attemptStartedAt = performance.now();
+  exerciseState.memoryEvaluationEndTime =
+    exerciseState.attemptStartedAt + EXERCISE_MEMORY_ATTEMPT_WINDOW_MS;
+
+  setExerciseCountdownText('Go');
+  setExerciseAttemptText('Sing now');
+  setExercisePhaseText('Sing');
+  setExerciseFeedback(
+    `Sing the remembered pitch for up to 3 seconds. Hold in tune for 1 second within +/-${EXERCISE_MATCH_TOLERANCE_CENTS} cents.`,
+    'neutral',
+  );
+  setStatus('Pitch memory: sing now', true);
+
+  exerciseState.memoryCountdownHideTimerId = window.setTimeout(() => {
+    if (
+      exerciseState.active &&
+      exerciseState.selectedExercise === 'pitch-memory' &&
+      exerciseState.phase === 'memory-sing'
+    ) {
+      setExerciseCountdownText('--');
+    }
+  }, 850);
+}
+
+function startPitchMemoryCountdown() {
+  if (!exerciseState.active || exerciseState.selectedExercise !== 'pitch-memory') {
+    return;
+  }
+
+  exerciseState.phase = 'memory-countdown';
+  let countdownValue = EXERCISE_MEMORY_COUNTDOWN_SECONDS;
+  setExerciseCountdownText(String(countdownValue));
+  setExerciseAttemptText('Get ready');
+  setExercisePhaseText('Countdown');
+  setExerciseFeedback('Countdown started. Prepare to sing on Go.', 'neutral');
+  setStatus('Pitch memory countdown', true);
+
+  exerciseState.memoryCountdownIntervalId = window.setInterval(() => {
+    countdownValue -= 1;
+
+    if (countdownValue > 0) {
+      setExerciseCountdownText(String(countdownValue));
+      return;
+    }
+
+    clearExerciseTimers();
+    beginPitchMemorySingWindow();
+  }, 1000);
+}
+
+async function startPitchMemoryExercise() {
+  syncExerciseRangeFromInputs();
+  syncExerciseMemoryDelayFromInput();
+
+  if (!running) {
+    await startAudio();
+  }
+
+  if (!running) {
+    return;
+  }
+
+  clearExerciseTimers();
+  resetExerciseAttemptState();
+  exerciseState.targetMidi = chooseExerciseTargetMidi();
+  exerciseState.active = true;
+  exerciseState.phase = 'memory-prompt';
+  exerciseState.lastResult = null;
+
+  setExerciseAttemptText('Memorize the prompt tone');
+  setExercisePhaseText('Prompt');
+  setExerciseFeedback(
+    `Listen now. You will sing the same pitch after ${exerciseState.memoryDelaySeconds} seconds.`,
+    'neutral',
+  );
+  setExerciseRevealText('Hidden');
+  setExerciseProgress(0);
+  setExerciseCountdownText('--');
+  setExerciseLiveReadout(null);
+
+  setStatus('Exercise prompt playing', true);
+  await replayExerciseTone();
+
+  if (!exerciseState.active || exerciseState.selectedExercise !== 'pitch-memory') {
+    return;
+  }
+
+  const preCountdownDelayMs = Math.max(
+    0,
+    (exerciseState.memoryDelaySeconds - EXERCISE_MEMORY_COUNTDOWN_SECONDS) *
+      1000,
+  );
+
+  if (preCountdownDelayMs <= 0) {
+    startPitchMemoryCountdown();
+    return;
+  }
+
+  exerciseState.phase = 'memory-wait';
+  setExerciseAttemptText('Waiting for countdown');
+  setExercisePhaseText('Memory hold');
+  setExerciseFeedback(
+    'Hold the tone in memory. Countdown starts soon.',
+    'neutral',
+  );
+  setStatus('Pitch memory: waiting', true);
+
+  exerciseState.memoryTimerId = window.setTimeout(() => {
+    startPitchMemoryCountdown();
+  }, preCountdownDelayMs);
 }
 
 function finalizePitchMatchingAttempt(success) {
@@ -480,13 +766,15 @@ function finalizePitchMatchingAttempt(success) {
     ? `Success. You matched ${revealedNote} for 1 second.`
     : `Try again. The target note was ${revealedNote}.${attemptSummary}`;
 
+  clearExerciseTimers();
   resetExerciseAttemptState();
   setExerciseProgress(success ? 1 : 0);
   setExerciseAttemptText(success ? 'Matched' : 'Try again');
+  setExercisePhaseText('Complete');
   setExerciseFeedback(message, success ? 'success' : 'warning');
   setExerciseRevealText(revealedNote);
+  setExerciseCountdownText('--');
   setStatus(success ? 'Exercise success' : 'Exercise try again', true);
-  updateExerciseButtons();
 }
 
 function updatePitchMatchingExercise(sample) {
@@ -558,6 +846,77 @@ function updatePitchMatchingExercise(sample) {
 
   if (now - exerciseState.attemptStartedAt >= EXERCISE_ATTEMPT_WINDOW_MS) {
     finalizePitchMatchingAttempt(false);
+  }
+}
+
+function updatePitchMemoryExercise(sample) {
+  if (
+    !exerciseState.active ||
+    exerciseState.selectedExercise !== 'pitch-memory' ||
+    exerciseState.targetMidi == null ||
+    exerciseState.phase !== 'memory-sing'
+  ) {
+    return;
+  }
+
+  const now = performance.now();
+  exerciseState.lastDetectedSample = {
+    frequency: sample.frequency,
+    midi: sample.midi,
+    confidence: sample.confidence,
+  };
+
+  const withinTolerance =
+    sample.confidence >= EXERCISE_MIN_CONFIDENCE &&
+    Math.abs(sample.midi - exerciseState.targetMidi) <=
+      EXERCISE_MATCH_TOLERANCE;
+
+  if (withinTolerance) {
+    if (exerciseState.holdStartTime == null) {
+      exerciseState.holdStartTime = now;
+    }
+
+    exerciseState.lastInTuneTime = now;
+    const heldMs = now - exerciseState.holdStartTime;
+
+    setExerciseAttemptText(`Sing now: ${(heldMs / 1000).toFixed(2)}s`);
+    setExerciseFeedback('Keep holding through the end of the sing window.', 'neutral');
+    setExerciseProgress(heldMs / EXERCISE_SUCCESS_HOLD_MS);
+
+    if (heldMs >= EXERCISE_SUCCESS_HOLD_MS) {
+      finalizePitchMemoryAttempt(true);
+      return;
+    }
+  } else if (
+    exerciseState.holdStartTime != null &&
+    exerciseState.lastInTuneTime != null &&
+    now - exerciseState.lastInTuneTime <= EXERCISE_HOLD_GRACE_MS
+  ) {
+    const heldMs = now - exerciseState.holdStartTime;
+    setExerciseAttemptText(`Sing now: ${(heldMs / 1000).toFixed(2)}s`);
+    setExerciseFeedback('Close. Keep steady and centered.', 'neutral');
+    setExerciseProgress(heldMs / EXERCISE_SUCCESS_HOLD_MS);
+
+    if (heldMs >= EXERCISE_SUCCESS_HOLD_MS) {
+      finalizePitchMemoryAttempt(true);
+      return;
+    }
+  } else {
+    exerciseState.holdStartTime = null;
+    exerciseState.lastInTuneTime = null;
+    setExerciseProgress(0);
+    setExerciseAttemptText('Sing now');
+    setExerciseFeedback(
+      `Center on the remembered pitch. ${describeDirectionFromTarget(sample.midi - exerciseState.targetMidi)}.`,
+      'neutral',
+    );
+  }
+
+  if (
+    exerciseState.memoryEvaluationEndTime != null &&
+    now >= exerciseState.memoryEvaluationEndTime
+  ) {
+    finalizePitchMemoryAttempt(false);
   }
 }
 
@@ -1327,30 +1686,54 @@ function updateFromAudio() {
     };
 
     pitchHistory.push(sample);
-    updatePitchMatchingExercise(sample);
+    if (exerciseState.active) {
+      if (exerciseState.selectedExercise === 'pitch-memory') {
+        updatePitchMemoryExercise(sample);
+      } else {
+        updatePitchMatchingExercise(sample);
+      }
+    }
     setPitchDisplay(sample);
     if (!exerciseState.active) {
       setStatus('Listening', true);
     }
   } else if (performance.now() % 1000 < 25) {
-    if (exerciseState.active) {
+    const expectsSingingNow =
+      exerciseState.active &&
+      (exerciseState.selectedExercise === 'pitch-matching' ||
+        (exerciseState.selectedExercise === 'pitch-memory' &&
+          exerciseState.phase === 'memory-sing'));
+
+    if (expectsSingingNow) {
       setExerciseLiveReadout(null);
       setExerciseAttemptText('Waiting for a stable note');
       setExerciseFeedback(
         'Sing the prompt pitch clearly so the tracker can lock on.',
         'neutral',
       );
-    } else {
+    } else if (!exerciseState.active) {
       setStatus('Listening for pitch...');
+    }
+
+    const now = performance.now();
+
+    if (
+      exerciseState.active &&
+      exerciseState.selectedExercise === 'pitch-matching' &&
+      exerciseState.attemptStartedAt != null &&
+      now - exerciseState.attemptStartedAt >= EXERCISE_ATTEMPT_WINDOW_MS
+    ) {
+      finalizePitchMatchingAttempt(false);
     }
 
     if (
       exerciseState.active &&
-      exerciseState.attemptStartedAt != null &&
-      performance.now() - exerciseState.attemptStartedAt >=
-        EXERCISE_ATTEMPT_WINDOW_MS
+      exerciseState.selectedExercise === 'pitch-memory' &&
+      exerciseState.phase === 'memory-sing' &&
+      exerciseState.memoryEvaluationEndTime != null &&
+      now >= exerciseState.memoryEvaluationEndTime
     ) {
-      finalizePitchMatchingAttempt(false);
+      finalizePitchMemoryAttempt(false);
     }
   }
 
@@ -1369,6 +1752,7 @@ function stopAudio() {
   pitchHistory = [];
   recentMidiSamples = [];
   recentRawMidiSamples = [];
+  clearExerciseTimers();
   resetExerciseAttemptState();
 
   if (animationFrameId) {
@@ -1438,6 +1822,7 @@ function resetView() {
   stopSustainedReferenceTone();
   activeReferencePointerId = null;
   setPitchDisplay(null);
+  clearExerciseTimers();
   resetExerciseAttemptState();
   resetExerciseUi();
   setStatus(running ? 'Listening' : 'Mic idle', running);
@@ -1475,8 +1860,24 @@ if (exerciseLowNote && exerciseHighNote) {
   exerciseHighNote.addEventListener('change', syncExerciseRangeFromInputs);
 }
 
+if (exerciseMemoryDelay) {
+  exerciseMemoryDelay.addEventListener('change', syncExerciseMemoryDelayFromInput);
+  exerciseMemoryDelay.addEventListener('blur', syncExerciseMemoryDelayFromInput);
+}
+
+if (exerciseType) {
+  exerciseType.addEventListener('change', () => {
+    setSelectedExercise(exerciseType.value);
+  });
+}
+
 if (exerciseStartButton) {
   exerciseStartButton.addEventListener('click', async () => {
+    if (exerciseState.selectedExercise === 'pitch-memory') {
+      await startPitchMemoryExercise();
+      return;
+    }
+
     await startPitchMatchingExercise();
   });
 }
@@ -1484,12 +1885,6 @@ if (exerciseStartButton) {
 if (exerciseDetailsToggle) {
   exerciseDetailsToggle.addEventListener('click', () => {
     setExerciseDetailsCollapsed(!exerciseState.detailsCollapsed);
-  });
-}
-
-if (exerciseReplayButton) {
-  exerciseReplayButton.addEventListener('click', async () => {
-    await replayExerciseTone();
   });
 }
 
@@ -1516,7 +1911,9 @@ resizeCanvas();
 setPitchDisplay(null);
 updateFollowToggleUi();
 populateExerciseRangeOptions();
+syncExerciseMemoryDelayFromInput();
 setExerciseDetailsCollapsed(true);
+updateExercisePresetUi();
 resetExerciseUi();
 setStatus('Mic idle');
 render();

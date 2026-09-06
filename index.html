@@ -165,10 +165,33 @@
                 id="exerciseDetails"
                 hidden
               >
+                <div class="exercise-config-grid">
+                  <label class="exercise-field exercise-field--wide">
+                    <span>Exercise</span>
+                    <select id="exerciseType">
+                      <option value="pitch-matching">Pitch Matching</option>
+                      <option value="pitch-memory">Pitch Memory</option>
+                    </select>
+                  </label>
+                </div>
+
                 <div class="exercise-card-copy">
-                  <span class="exercise-badge">Preset exercise</span>
-                  <p class="exercise-title">Pitch Matching</p>
-                  <p class="exercise-description">
+                  <span
+                    class="exercise-badge"
+                    id="exerciseBadge"
+                  >
+                    Preset exercise
+                  </span>
+                  <p
+                    class="exercise-title"
+                    id="exerciseTitle"
+                  >
+                    Pitch Matching
+                  </p>
+                  <p
+                    class="exercise-description"
+                    id="exerciseDescription"
+                  >
                     Choose the comfortable range you want to practice in, then sing
                     the prompt tone back without seeing the note name first.
                   </p>
@@ -183,6 +206,21 @@
                     <span>Highest note</span>
                     <select id="exerciseHighNote"></select>
                   </label>
+                  <label
+                    class="exercise-field"
+                    id="exerciseMemoryDelayField"
+                    hidden
+                  >
+                    <span>Delay (seconds)</span>
+                    <input
+                      id="exerciseMemoryDelay"
+                      type="number"
+                      min="1"
+                      max="100"
+                      value="8"
+                      step="1"
+                    />
+                  </label>
                 </div>
               </div>
 
@@ -193,14 +231,6 @@
                   type="button"
                 >
                   Start pitch matching
-                </button>
-                <button
-                  id="exerciseReplayButton"
-                  class="secondary-button"
-                  type="button"
-                  disabled
-                >
-                  Replay tone
                 </button>
               </div>
 
@@ -236,11 +266,21 @@
                   <span class="panel-label">Exercise status</span>
                   <span id="exerciseAttemptLabel">Idle</span>
                 </div>
+                <p class="exercise-phase-line">
+                  <span class="panel-label">Phase</span>
+                  <span id="exercisePhaseLabel">Idle</span>
+                </p>
                 <p
                   class="exercise-feedback"
                   id="exerciseFeedback"
                 >
                   Select your range and start when you are ready.
+                </p>
+                <p
+                  class="exercise-memory-countdown"
+                  id="exerciseMemoryCountdown"
+                >
+                  --
                 </p>
                 <div class="exercise-progress-track">
                   <div

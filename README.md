@@ -40,6 +40,17 @@ Open Exercises to launch Pitch Matching.
 - Sing the pitch back within about +/-35 cents of the target and hold it steadily for one second to succeed.
 - After each attempt, the app reveals the target note and gives success or try-again feedback.
 
+## Pitch Memory
+
+Open Exercises, switch the Exercise selector to Pitch Memory, then:
+
+- Set the lowest and highest notes in your comfortable range.
+- Set the delay in seconds (1 to 100).
+- Start the exercise to hear a prompt tone.
+- After the delay minus 3 seconds, the app starts a 3, 2, 1, Go countdown.
+- Sing the remembered pitch on Go and hold it for one second to pass.
+- The app reveals the target note and reports success or try-again after each attempt.
+
 ## Notes
 
 - The app uses your microphone, so you will need to allow browser access when prompted.
