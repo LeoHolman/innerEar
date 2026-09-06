@@ -14,12 +14,14 @@ const NOTE_NAMES = [
 ];
 const VOCAL_LOW_MIDI = 36;
 const VOCAL_HIGH_MIDI = 84;
-const VIEWPORT_SEMITONES = 12;
+const VIEWPORT_SEMITONES = 20;
 const WINDOW_MS = 5200;
 const TOP_GAP = 34;
 const BOTTOM_GAP = 110;
 const SMOOTHING = 0.22;
 const MAX_PITCH_STEP = 7;
+const LOW_CONFIDENCE_SLEW_LIMIT = 2.4;
+const HIGH_CONFIDENCE_SLEW_LIMIT = 5.5;
 const MIN_DETECT_HZ = 65;
 const MAX_DETECT_HZ = 1000;
 
@@ -55,6 +57,7 @@ let followPitchEnabled = true;
 let lastStableMidi = null;
 let pitchHistory = [];
 let recentMidiSamples = [];
+let recentRawMidiSamples = [];
 let activeReferencePointerId = null;
 
 const REFERENCE_LOW_MIDI = 24;
@@ -453,31 +456,6 @@ function handleCanvasPointerLeave(event) {
   }
 }
 
-function foldMidiToReference(
-  midi,
-  referenceMidi,
-  minMidi = VOCAL_LOW_MIDI,
-  maxMidi = VOCAL_HIGH_MIDI,
-) {
-  const boundedMidi = clamp(midi, minMidi, maxMidi);
-  let bestMidi = boundedMidi;
-  let bestDistance = Math.abs(boundedMidi - referenceMidi);
-
-  for (let octaveShift = -6; octaveShift <= 6; octaveShift += 1) {
-    const candidate = midi + octaveShift * 12;
-    if (candidate < minMidi || candidate > maxMidi) {
-      continue;
-    }
-    const candidateDistance = Math.abs(candidate - referenceMidi);
-    if (candidateDistance < bestDistance) {
-      bestMidi = candidate;
-      bestDistance = candidateDistance;
-    }
-  }
-
-  return bestMidi;
-}
-
 function stabilizeMidi(rawMidi, confidence = 0) {
   const vocalMidi = clamp(rawMidi, VOCAL_LOW_MIDI, VOCAL_HIGH_MIDI);
 
@@ -485,14 +463,45 @@ function stabilizeMidi(rawMidi, confidence = 0) {
     return vocalMidi;
   }
 
-  const foldedMidi = foldMidiToReference(vocalMidi, lastStableMidi);
-  const pitchStep = Math.abs(foldedMidi - lastStableMidi);
-
-  if (pitchStep > MAX_PITCH_STEP && confidence < 0.78) {
-    return lastStableMidi;
+  let candidateMidi = vocalMidi;
+  const maxStepPerFrame =
+    confidence < 0.78 ? LOW_CONFIDENCE_SLEW_LIMIT : HIGH_CONFIDENCE_SLEW_LIMIT;
+  const directedStep = candidateMidi - lastStableMidi;
+  if (Math.abs(directedStep) > maxStepPerFrame) {
+    candidateMidi = lastStableMidi + Math.sign(directedStep) * maxStepPerFrame;
   }
 
-  return lastStableMidi * (1 - SMOOTHING) + foldedMidi * SMOOTHING;
+  const pitchStep = Math.abs(candidateMidi - lastStableMidi);
+
+  if (pitchStep > MAX_PITCH_STEP && confidence < 0.78) {
+    const conservativeSmoothing = SMOOTHING * 0.45;
+    return (
+      lastStableMidi * (1 - conservativeSmoothing) +
+      candidateMidi * conservativeSmoothing
+    );
+  }
+
+  return lastStableMidi * (1 - SMOOTHING) + candidateMidi * SMOOTHING;
+}
+
+function filterOnsetTransient(rawMidi, confidence = 0) {
+  recentRawMidiSamples.push(rawMidi);
+  recentRawMidiSamples = recentRawMidiSamples.slice(-4);
+
+  if (recentRawMidiSamples.length < 3) {
+    return rawMidi;
+  }
+
+  const previous = recentRawMidiSamples.slice(0, -1);
+  const baseline = median(previous);
+  const latest = recentRawMidiSamples[recentRawMidiSamples.length - 1];
+  const transientJump = Math.abs(latest - baseline);
+
+  if (transientJump > 3.2 && confidence < 0.82) {
+    return baseline + clamp(latest - baseline, -1.8, 1.8);
+  }
+
+  return latest;
 }
 
 function smoothMidiForTrail(stableMidi) {
@@ -653,7 +662,7 @@ function render() {
   animationFrameId = requestAnimationFrame(render);
 }
 
-function autoCorrelate(buffer, sampleRate) {
+function autoCorrelate(buffer, sampleRate, referenceFrequency = null) {
   let rms = 0;
   for (let index = 0; index < buffer.length; index += 1) {
     const value = buffer[index];
@@ -711,9 +720,7 @@ function autoCorrelate(buffer, sampleRate) {
     }
   }
 
-  let best = -1;
-  let bestValue = -Infinity;
-  const localPeakThreshold = peakValue * 0.35;
+  const localPeakThreshold = peakValue * 0.28;
 
   let firstValley = minLag;
   for (let index = minLag + 1; index < maxLag; index += 1) {
@@ -726,6 +733,8 @@ function autoCorrelate(buffer, sampleRate) {
     }
   }
 
+  const localPeaks = [];
+
   for (let index = firstValley + 1; index < maxLag; index += 1) {
     const current = correlates[index];
     if (
@@ -733,56 +742,67 @@ function autoCorrelate(buffer, sampleRate) {
       current >= correlates[index + 1] &&
       current >= localPeakThreshold
     ) {
-      best = index;
-      bestValue = current;
-      break;
+      localPeaks.push(index);
     }
   }
 
-  if (best === -1) {
+  if (localPeaks.length === 0) {
     for (let index = minLag; index < maxLag; index += 1) {
       const current = correlates[index];
       if (
         current > correlates[index - 1] &&
         current >= correlates[index + 1] &&
-        current >= localPeakThreshold &&
-        current > bestValue
+        current >= localPeakThreshold
       ) {
-        best = index;
-        bestValue = current;
+        localPeaks.push(index);
       }
     }
   }
 
+  let best = -1;
+  let bestScore = -Infinity;
+
+  const expectedLag =
+    referenceFrequency && isFinite(referenceFrequency) && referenceFrequency > 0
+      ? sampleRate / referenceFrequency
+      : null;
+
+  for (const lag of localPeaks) {
+    const normalized = correlates[lag] / (peakValue || 1);
+    const octaveLag = lag * 2;
+    const fifthLag = lag * 3;
+    const octaveSupport =
+      octaveLag <= maxLag ? correlates[octaveLag] / (peakValue || 1) : 0;
+    const fifthSupport =
+      fifthLag <= maxLag ? correlates[fifthLag] / (peakValue || 1) : 0;
+
+    let score = normalized;
+
+    // Favor candidates that also show harmonic structure and a lower-fundamental bias.
+    score += clamp(octaveSupport, 0, 1) * 0.2;
+    score += clamp(fifthSupport, 0, 1) * 0.12;
+    score += (lag / maxLag) * 0.06;
+
+    if (expectedLag) {
+      const lagRatio = lag / expectedLag;
+      const semitoneDistance = Math.abs(12 * Math.log2(lagRatio));
+      const continuity = clamp(1 - semitoneDistance / 9, 0, 1);
+      score += continuity * 0.18;
+    }
+
+    if (score > bestScore) {
+      bestScore = score;
+      best = lag;
+    }
+  }
+
   if (best === -1) {
+    let bestValue = -Infinity;
     for (let index = minLag; index <= maxLag; index += 1) {
       if (correlates[index] > bestValue) {
         bestValue = correlates[index];
         best = index;
       }
-    }
-  }
-
-  if (best > 0) {
-    const OCTAVE_SUBHARMONIC_RATIO = 0.84;
-    const FIFTH_SUBHARMONIC_RATIO = 0.88;
-
-    const octaveCandidate = best * 2;
-    if (
-      octaveCandidate <= maxLag &&
-      correlates[octaveCandidate] >= bestValue * OCTAVE_SUBHARMONIC_RATIO
-    ) {
-      best = octaveCandidate;
-      bestValue = correlates[octaveCandidate];
-    }
-
-    const fifthCandidate = best * 3;
-    if (
-      fifthCandidate <= maxLag &&
-      correlates[fifthCandidate] >= bestValue * FIFTH_SUBHARMONIC_RATIO
-    ) {
-      best = fifthCandidate;
-      bestValue = correlates[fifthCandidate];
     }
   }
 
@@ -812,11 +832,18 @@ function updateFromAudio() {
 
   const buffer = new Float32Array(analyser.fftSize);
   analyser.getFloatTimeDomainData(buffer);
-  const result = autoCorrelate(buffer, audioContext.sampleRate);
+  const referenceFrequency =
+    lastStableMidi != null ? midiToFrequency(lastStableMidi) : null;
+  const result = autoCorrelate(
+    buffer,
+    audioContext.sampleRate,
+    referenceFrequency,
+  );
 
   if (result.frequency > 0) {
     const rawMidi = frequencyToMidi(result.frequency);
-    const stabilizedMidi = stabilizeMidi(rawMidi, result.confidence);
+    const filteredRawMidi = filterOnsetTransient(rawMidi, result.confidence);
+    const stabilizedMidi = stabilizeMidi(filteredRawMidi, result.confidence);
     const displayMidi = smoothMidiForTrail(stabilizedMidi);
     lastStableMidi = stabilizedMidi;
     if (followPitchEnabled) {
@@ -860,6 +887,7 @@ function stopAudio() {
   lastStableMidi = null;
   pitchHistory = [];
   recentMidiSamples = [];
+  recentRawMidiSamples = [];
 
   if (animationFrameId) {
     cancelAnimationFrame(animationFrameId);
