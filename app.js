@@ -302,6 +302,15 @@ function setExerciseLiveReadout(sample) {
     return;
   }
 
+  if (
+    exerciseState.selectedExercise === 'pitch-memory' &&
+    exerciseState.phase !== 'memory-sing'
+  ) {
+    exerciseCurrentDelta.textContent =
+      'Current match guidance: hidden until Go';
+    return;
+  }
+
   const deltaSemitones = sample.midi - exerciseState.targetMidi;
   exerciseCurrentDelta.textContent = `Current match guidance: ${describeDirectionFromTarget(deltaSemitones)}`;
 }
@@ -411,9 +420,7 @@ function syncExerciseMemoryDelayFromInput() {
   const parsed = Number(exerciseMemoryDelay.value);
   const normalized = Math.round(
     clamp(
-      Number.isFinite(parsed)
-        ? parsed
-        : EXERCISE_MEMORY_MIN_DELAY_SECONDS,
+      Number.isFinite(parsed) ? parsed : EXERCISE_MEMORY_MIN_DELAY_SECONDS,
       EXERCISE_MEMORY_MIN_DELAY_SECONDS,
       EXERCISE_MEMORY_MAX_DELAY_SECONDS,
     ),
@@ -665,7 +672,10 @@ function beginPitchMemorySingWindow() {
 }
 
 function startPitchMemoryCountdown() {
-  if (!exerciseState.active || exerciseState.selectedExercise !== 'pitch-memory') {
+  if (
+    !exerciseState.active ||
+    exerciseState.selectedExercise !== 'pitch-memory'
+  ) {
     return;
   }
 
@@ -723,7 +733,10 @@ async function startPitchMemoryExercise() {
   setStatus('Exercise prompt playing', true);
   await replayExerciseTone();
 
-  if (!exerciseState.active || exerciseState.selectedExercise !== 'pitch-memory') {
+  if (
+    !exerciseState.active ||
+    exerciseState.selectedExercise !== 'pitch-memory'
+  ) {
     return;
   }
 
@@ -880,7 +893,10 @@ function updatePitchMemoryExercise(sample) {
     const heldMs = now - exerciseState.holdStartTime;
 
     setExerciseAttemptText(`Sing now: ${(heldMs / 1000).toFixed(2)}s`);
-    setExerciseFeedback('Keep holding through the end of the sing window.', 'neutral');
+    setExerciseFeedback(
+      'Keep holding through the end of the sing window.',
+      'neutral',
+    );
     setExerciseProgress(heldMs / EXERCISE_SUCCESS_HOLD_MS);
 
     if (heldMs >= EXERCISE_SUCCESS_HOLD_MS) {
@@ -1861,8 +1877,14 @@ if (exerciseLowNote && exerciseHighNote) {
 }
 
 if (exerciseMemoryDelay) {
-  exerciseMemoryDelay.addEventListener('change', syncExerciseMemoryDelayFromInput);
-  exerciseMemoryDelay.addEventListener('blur', syncExerciseMemoryDelayFromInput);
+  exerciseMemoryDelay.addEventListener(
+    'change',
+    syncExerciseMemoryDelayFromInput,
+  );
+  exerciseMemoryDelay.addEventListener(
+    'blur',
+    syncExerciseMemoryDelayFromInput,
+  );
 }
 
 if (exerciseType) {
