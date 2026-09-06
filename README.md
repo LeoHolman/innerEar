@@ -56,10 +56,11 @@ Open Exercises, switch the Exercise selector to Pitch Memory, then:
 Open Exercises, switch the Exercise selector to Match the Scale, then:
 
 - Set your lowest and highest comfortable notes.
-- Choose the scale type (currently Major).
+- Choose the scale type (Major, Minor, or Pentatonic).
+- Choose the direction (Ascending or Descending).
 - Start the exercise to hear one tonic note.
-- Sing upward through the full scale, holding each degree in tune for one second.
-- The selected tonic is chosen so it is not below your low limit, and the top of the scale does not exceed your high limit.
+- Sing through each degree in the selected direction, holding each degree in tune for one second.
+- The selected tonic is chosen so the full target scale stays inside your selected low/high range.
 - When the attempt ends, the roll overlays target note outlines against your sung contour so you can see where each degree drifted.
 
 ## Notes

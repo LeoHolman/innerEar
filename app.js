@@ -56,6 +56,12 @@ const exerciseScaleType = document.getElementById('exerciseScaleType');
 const exerciseScaleTypeField = document.getElementById(
   'exerciseScaleTypeField',
 );
+const exerciseScaleDirection = document.getElementById(
+  'exerciseScaleDirection',
+);
+const exerciseScaleDirectionField = document.getElementById(
+  'exerciseScaleDirectionField',
+);
 const exerciseStartButton = document.getElementById('exerciseStartButton');
 const exerciseDetailsToggle = document.getElementById('exerciseDetailsToggle');
 const exerciseFeedback = document.getElementById('exerciseFeedback');
@@ -115,10 +121,19 @@ const EXERCISE_SCALE_TOTAL_TIMEOUT_MS = 36000;
 
 const SCALE_PATTERNS = {
   major: [0, 2, 4, 5, 7, 9, 11, 12],
+  minor: [0, 2, 3, 5, 7, 8, 10, 12],
+  pentatonic: [0, 2, 4, 7, 9, 12],
 };
 
 const SCALE_LABELS = {
   major: 'Major',
+  minor: 'Minor',
+  pentatonic: 'Pentatonic',
+};
+
+const SCALE_DIRECTIONS = {
+  ascending: 'ascending',
+  descending: 'descending',
 };
 
 const EXERCISE_PRESETS = {
@@ -155,6 +170,7 @@ const exerciseState = {
   rangeHighMidi: 60,
   memoryDelaySeconds: 8,
   scaleType: 'major',
+  scaleDirection: SCALE_DIRECTIONS.ascending,
   scaleNotes: [],
   scaleStepIndex: 0,
   scaleSingStartedAt: null,
@@ -489,6 +505,20 @@ function syncExerciseScaleTypeFromInput() {
   exerciseScaleType.value = nextScaleType;
 }
 
+function syncExerciseScaleDirectionFromInput() {
+  if (!exerciseScaleDirection) {
+    return;
+  }
+
+  const nextDirection =
+    exerciseScaleDirection.value === SCALE_DIRECTIONS.descending
+      ? SCALE_DIRECTIONS.descending
+      : SCALE_DIRECTIONS.ascending;
+
+  exerciseState.scaleDirection = nextDirection;
+  exerciseScaleDirection.value = nextDirection;
+}
+
 function clearExerciseReview() {
   exerciseState.scaleReview = null;
 }
@@ -528,11 +558,22 @@ function updateExercisePresetUi() {
     exerciseScaleTypeField.hidden = !isScaleMatch;
   }
 
+  if (exerciseScaleDirectionField) {
+    exerciseScaleDirectionField.hidden = !isScaleMatch;
+  }
+
   if (
     exerciseScaleType &&
     exerciseScaleType.value !== exerciseState.scaleType
   ) {
     exerciseScaleType.value = exerciseState.scaleType;
+  }
+
+  if (
+    exerciseScaleDirection &&
+    exerciseScaleDirection.value !== exerciseState.scaleDirection
+  ) {
+    exerciseScaleDirection.value = exerciseState.scaleDirection;
   }
 
   if (!isPitchMemory) {
@@ -573,10 +614,44 @@ function getScalePattern(scaleType) {
   return SCALE_PATTERNS[scaleType] || SCALE_PATTERNS.major;
 }
 
+function getScaleDirectionLabel(direction) {
+  return direction === SCALE_DIRECTIONS.descending ? 'Descending' : 'Ascending';
+}
+
+function getDirectedScaleOffsets(scaleType, direction) {
+  const pattern = getScalePattern(scaleType);
+
+  if (direction !== SCALE_DIRECTIONS.descending) {
+    return [...pattern];
+  }
+
+  if (pattern.length < 2) {
+    return [0];
+  }
+
+  const steps = [];
+  for (let index = 1; index < pattern.length; index += 1) {
+    steps.push(pattern[index] - pattern[index - 1]);
+  }
+
+  const descendingOffsets = [0];
+  let current = 0;
+  for (let index = steps.length - 1; index >= 0; index -= 1) {
+    current -= steps[index];
+    descendingOffsets.push(current);
+  }
+
+  return descendingOffsets;
+}
+
 function chooseScaleRootMidi() {
-  const pattern = getScalePattern(exerciseState.scaleType);
-  const highestOffset = Math.max(...pattern);
-  const minRoot = exerciseState.rangeLowMidi;
+  const offsets = getDirectedScaleOffsets(
+    exerciseState.scaleType,
+    exerciseState.scaleDirection,
+  );
+  const lowestOffset = Math.min(...offsets);
+  const highestOffset = Math.max(...offsets);
+  const minRoot = exerciseState.rangeLowMidi - lowestOffset;
   const maxRoot = exerciseState.rangeHighMidi - highestOffset;
 
   if (maxRoot < minRoot) {
@@ -587,8 +662,11 @@ function chooseScaleRootMidi() {
 }
 
 function buildScaleNotes(rootMidi, scaleType) {
-  const pattern = getScalePattern(scaleType);
-  return pattern.map((offset) => rootMidi + offset);
+  const offsets = getDirectedScaleOffsets(
+    scaleType,
+    exerciseState.scaleDirection,
+  );
+  return offsets.map((offset) => rootMidi + offset);
 }
 
 async function playReferenceToneForDuration(midi, durationMs = 1200) {
@@ -868,6 +946,7 @@ async function startPitchMemoryExercise() {
 function finalizeScaleExerciseAttempt(success, failureReason = '') {
   const scaleNotes = [...exerciseState.scaleNotes];
   const scaleTypeLabel = SCALE_LABELS[exerciseState.scaleType] || 'Scale';
+  const directionLabel = getScaleDirectionLabel(exerciseState.scaleDirection);
   const rootMidi = exerciseState.targetMidi;
   const rootName = rootMidi != null ? midiToNoteName(rootMidi) : '--';
   const singStartedAt = exerciseState.scaleSingStartedAt;
@@ -890,7 +969,7 @@ function finalizeScaleExerciseAttempt(success, failureReason = '') {
     })),
     actualSamples: scaleRecordedSamples,
     durationMs: reviewDurationMs,
-    label: `${rootName} ${scaleTypeLabel}`,
+    label: `${rootName} ${scaleTypeLabel} ${directionLabel}`,
   };
 
   clearExerciseTimers();
@@ -902,7 +981,7 @@ function finalizeScaleExerciseAttempt(success, failureReason = '') {
 
   if (success) {
     setExerciseFeedback(
-      `Success. You completed ${rootName} ${scaleTypeLabel} ascending with one-second holds.`,
+      `Success. You completed ${rootName} ${scaleTypeLabel} ${directionLabel.toLowerCase()} with one-second holds.`,
       'success',
     );
     setStatus('Exercise success', true);
@@ -914,7 +993,7 @@ function finalizeScaleExerciseAttempt(success, failureReason = '') {
     setStatus('Exercise try again', true);
   }
 
-  setExerciseRevealText(`${rootName} ${scaleTypeLabel}`);
+  setExerciseRevealText(`${rootName} ${scaleTypeLabel} ${directionLabel}`);
 }
 
 function updateScaleExercise(sample) {
@@ -1034,6 +1113,7 @@ function updateScaleExercise(sample) {
 async function startScaleExercise() {
   syncExerciseRangeFromInputs();
   syncExerciseScaleTypeFromInput();
+  syncExerciseScaleDirectionFromInput();
 
   if (!running) {
     await startAudio();
@@ -1048,11 +1128,13 @@ async function startScaleExercise() {
   clearExerciseReview();
 
   const rootMidi = chooseScaleRootMidi();
+  const scaleTypeLabel = SCALE_LABELS[exerciseState.scaleType] || 'Scale';
+  const directionLabel = getScaleDirectionLabel(exerciseState.scaleDirection);
   if (rootMidi == null) {
     setExercisePhaseText('Idle');
     setExerciseAttemptText('Range too narrow');
     setExerciseFeedback(
-      'This range cannot fit a full ascending major scale. Raise the highest note or lower the lowest note.',
+      `This range cannot fit a ${directionLabel.toLowerCase()} ${scaleTypeLabel.toLowerCase()} scale. Adjust the range and try again.`,
       'warning',
     );
     setExerciseRevealText('--');
@@ -1074,14 +1156,14 @@ async function startScaleExercise() {
   exerciseState.lastInTuneTime = null;
 
   setExerciseRevealText(
-    `${midiToNoteName(rootMidi)} ${SCALE_LABELS[exerciseState.scaleType] || 'Scale'}`,
+    `${midiToNoteName(rootMidi)} ${scaleTypeLabel} ${directionLabel}`,
   );
   setExerciseCountdownText('--');
   setExerciseProgress(0);
   setExercisePhaseText('Prompt');
   setExerciseAttemptText('Listen to the tonic');
   setExerciseFeedback(
-    `Tonic is ${midiToNoteName(rootMidi)}. Then sing each degree of the ascending major scale, holding each note for 1 second.`,
+    `Tonic is ${midiToNoteName(rootMidi)}. Then sing each degree of the ${directionLabel.toLowerCase()} ${scaleTypeLabel.toLowerCase()} scale, holding each note for 1 second.`,
     'neutral',
   );
   setExerciseLiveReadout(null);
@@ -1103,7 +1185,9 @@ async function startScaleExercise() {
     `Degree 1/${scaleNotes.length}: ${midiToNoteName(scaleNotes[0])}`,
   );
   setExerciseFeedback(
-    'Start on the tonic and move upward one degree at a time.',
+    directionLabel === 'Descending'
+      ? 'Start on the tonic and move downward one degree at a time.'
+      : 'Start on the tonic and move upward one degree at a time.',
     'neutral',
   );
   setStatus('Scale exercise listening', true);
@@ -2353,6 +2437,13 @@ if (exerciseScaleType) {
   exerciseScaleType.addEventListener('change', syncExerciseScaleTypeFromInput);
 }
 
+if (exerciseScaleDirection) {
+  exerciseScaleDirection.addEventListener(
+    'change',
+    syncExerciseScaleDirectionFromInput,
+  );
+}
+
 if (exerciseType) {
   exerciseType.addEventListener('change', () => {
     setSelectedExercise(exerciseType.value);
@@ -2406,6 +2497,7 @@ updateFollowToggleUi();
 populateExerciseRangeOptions();
 syncExerciseMemoryDelayFromInput();
 syncExerciseScaleTypeFromInput();
+syncExerciseScaleDirectionFromInput();
 setExerciseDetailsCollapsed(true);
 updateExercisePresetUi();
 resetExerciseUi();
