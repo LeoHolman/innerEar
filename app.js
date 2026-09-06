@@ -423,7 +423,10 @@ async function handleCanvasPointerMove(event) {
 }
 
 function endReferencePointer(pointerId) {
-  if (activeReferencePointerId == null || pointerId !== activeReferencePointerId) {
+  if (
+    activeReferencePointerId == null ||
+    pointerId !== activeReferencePointerId
+  ) {
     return;
   }
 
@@ -449,8 +452,6 @@ function handleCanvasPointerLeave(event) {
     endReferencePointer(event.pointerId);
   }
 }
-
-
 
 function foldMidiToReference(
   midi,
@@ -525,7 +526,8 @@ function drawBackground(ctx, width, height, centerMidi) {
   for (let midi = keyStartMidi; midi <= keyEndMidi; midi += 1) {
     const noteClass = ((midi % 12) + 12) % 12;
     const isNatural = [0, 2, 4, 5, 7, 9, 11].includes(noteClass);
-    const isActive = activeReferenceMidi != null && midi === activeReferenceMidi;
+    const isActive =
+      activeReferenceMidi != null && midi === activeReferenceMidi;
     const keyTop = midiToY(midi + 0.5, height, centerMidi);
     const keyBottom = midiToY(midi - 0.5, height, centerMidi);
     const keyY = Math.min(keyTop, keyBottom);
