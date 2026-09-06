@@ -52,6 +52,8 @@ const exerciseMemoryDelay = document.getElementById('exerciseMemoryDelay');
 const exerciseMemoryDelayField = document.getElementById(
   'exerciseMemoryDelayField',
 );
+const exerciseScaleType = document.getElementById('exerciseScaleType');
+const exerciseScaleTypeField = document.getElementById('exerciseScaleTypeField');
 const exerciseStartButton = document.getElementById('exerciseStartButton');
 const exerciseDetailsToggle = document.getElementById('exerciseDetailsToggle');
 const exerciseFeedback = document.getElementById('exerciseFeedback');
@@ -106,6 +108,16 @@ const EXERCISE_MEMORY_MIN_DELAY_SECONDS = 1;
 const EXERCISE_MEMORY_MAX_DELAY_SECONDS = 100;
 const EXERCISE_MEMORY_COUNTDOWN_SECONDS = 3;
 const EXERCISE_MEMORY_ATTEMPT_WINDOW_MS = 3000;
+const EXERCISE_SCALE_STEP_HOLD_MS = 1000;
+const EXERCISE_SCALE_TOTAL_TIMEOUT_MS = 36000;
+
+const SCALE_PATTERNS = {
+  major: [0, 2, 4, 5, 7, 9, 11, 12],
+};
+
+const SCALE_LABELS = {
+  major: 'Major',
+};
 
 const EXERCISE_PRESETS = {
   'pitch-matching': {
@@ -122,6 +134,13 @@ const EXERCISE_PRESETS = {
       'Hear a target tone, hold it in memory, then reproduce it after a timed countdown.',
     startLabel: 'Start pitch memory',
   },
+  'match-scale': {
+    badge: 'Scale exercise',
+    title: 'Match the Scale',
+    description:
+      'Hear the tonic, then sing upward through each scale degree and hold every note for one second.',
+    startLabel: 'Start match the scale',
+  },
 };
 
 const exerciseState = {
@@ -133,6 +152,12 @@ const exerciseState = {
   rangeLowMidi: 48,
   rangeHighMidi: 60,
   memoryDelaySeconds: 8,
+  scaleType: 'major',
+  scaleNotes: [],
+  scaleStepIndex: 0,
+  scaleSingStartedAt: null,
+  scaleRecordedSamples: [],
+  scaleReview: null,
   memoryTimerId: null,
   memoryCountdownIntervalId: null,
   memoryCountdownHideTimerId: null,
@@ -311,7 +336,22 @@ function setExerciseLiveReadout(sample) {
     return;
   }
 
-  const deltaSemitones = sample.midi - exerciseState.targetMidi;
+  let targetMidi = exerciseState.targetMidi;
+  if (
+    exerciseState.selectedExercise === 'match-scale' &&
+    exerciseState.active &&
+    exerciseState.phase === 'scale-sing' &&
+    exerciseState.scaleNotes.length > 0
+  ) {
+    const scaleTargetIndex = clamp(
+      exerciseState.scaleStepIndex,
+      0,
+      exerciseState.scaleNotes.length - 1,
+    );
+    targetMidi = exerciseState.scaleNotes[scaleTargetIndex];
+  }
+
+  const deltaSemitones = sample.midi - targetMidi;
   exerciseCurrentDelta.textContent = `Current match guidance: ${describeDirectionFromTarget(deltaSemitones)}`;
 }
 
@@ -380,6 +420,10 @@ function resetExerciseAttemptState() {
   exerciseState.active = false;
   exerciseState.phase = 'idle';
   exerciseState.targetMidi = null;
+  exerciseState.scaleNotes = [];
+  exerciseState.scaleStepIndex = 0;
+  exerciseState.scaleSingStartedAt = null;
+  exerciseState.scaleRecordedSamples = [];
   exerciseState.memoryEvaluationEndTime = null;
   exerciseState.holdStartTime = null;
   exerciseState.lastInTuneTime = null;
@@ -430,11 +474,29 @@ function syncExerciseMemoryDelayFromInput() {
   exerciseMemoryDelay.value = String(normalized);
 }
 
+function syncExerciseScaleTypeFromInput() {
+  if (!exerciseScaleType) {
+    return;
+  }
+
+  const nextScaleType = SCALE_PATTERNS[exerciseScaleType.value]
+    ? exerciseScaleType.value
+    : 'major';
+
+  exerciseState.scaleType = nextScaleType;
+  exerciseScaleType.value = nextScaleType;
+}
+
+function clearExerciseReview() {
+  exerciseState.scaleReview = null;
+}
+
 function updateExercisePresetUi() {
   const preset =
     EXERCISE_PRESETS[exerciseState.selectedExercise] ||
     EXERCISE_PRESETS['pitch-matching'];
   const isPitchMemory = exerciseState.selectedExercise === 'pitch-memory';
+  const isScaleMatch = exerciseState.selectedExercise === 'match-scale';
 
   if (exerciseType && exerciseType.value !== exerciseState.selectedExercise) {
     exerciseType.value = exerciseState.selectedExercise;
@@ -460,6 +522,14 @@ function updateExercisePresetUi() {
     exerciseMemoryDelayField.hidden = !isPitchMemory;
   }
 
+  if (exerciseScaleTypeField) {
+    exerciseScaleTypeField.hidden = !isScaleMatch;
+  }
+
+  if (exerciseScaleType && exerciseScaleType.value !== exerciseState.scaleType) {
+    exerciseScaleType.value = exerciseState.scaleType;
+  }
+
   if (!isPitchMemory) {
     setExerciseCountdownText('--');
   }
@@ -472,6 +542,7 @@ function setSelectedExercise(exerciseId) {
   exerciseState.selectedExercise = normalized;
   clearExerciseTimers();
   resetExerciseAttemptState();
+  clearExerciseReview();
   updateExercisePresetUi();
   resetExerciseUi();
 }
@@ -491,6 +562,28 @@ function chooseExerciseTargetMidi() {
   return (
     exerciseState.rangeLowMidi + Math.floor(Math.random() * Math.max(1, range))
   );
+}
+
+function getScalePattern(scaleType) {
+  return SCALE_PATTERNS[scaleType] || SCALE_PATTERNS.major;
+}
+
+function chooseScaleRootMidi() {
+  const pattern = getScalePattern(exerciseState.scaleType);
+  const highestOffset = Math.max(...pattern);
+  const minRoot = exerciseState.rangeLowMidi;
+  const maxRoot = exerciseState.rangeHighMidi - highestOffset;
+
+  if (maxRoot < minRoot) {
+    return null;
+  }
+
+  return minRoot + Math.floor(Math.random() * (maxRoot - minRoot + 1));
+}
+
+function buildScaleNotes(rootMidi, scaleType) {
+  const pattern = getScalePattern(scaleType);
+  return pattern.map((offset) => rootMidi + offset);
 }
 
 async function playReferenceToneForDuration(midi, durationMs = 1200) {
@@ -587,6 +680,7 @@ async function startPitchMatchingExercise() {
 
   clearExerciseTimers();
   resetExerciseAttemptState();
+  clearExerciseReview();
   exerciseState.targetMidi = chooseExerciseTargetMidi();
   exerciseState.active = true;
   exerciseState.phase = 'matching-listening';
@@ -714,6 +808,7 @@ async function startPitchMemoryExercise() {
 
   clearExerciseTimers();
   resetExerciseAttemptState();
+  clearExerciseReview();
   exerciseState.targetMidi = chooseExerciseTargetMidi();
   exerciseState.active = true;
   exerciseState.phase = 'memory-prompt';
@@ -763,6 +858,247 @@ async function startPitchMemoryExercise() {
   exerciseState.memoryTimerId = window.setTimeout(() => {
     startPitchMemoryCountdown();
   }, preCountdownDelayMs);
+}
+
+function finalizeScaleExerciseAttempt(success, failureReason = '') {
+  const scaleNotes = [...exerciseState.scaleNotes];
+  const scaleTypeLabel = SCALE_LABELS[exerciseState.scaleType] || 'Scale';
+  const rootMidi = exerciseState.targetMidi;
+  const rootName = rootMidi != null ? midiToNoteName(rootMidi) : '--';
+  const singStartedAt = exerciseState.scaleSingStartedAt;
+  const scaleRecordedSamples = [...exerciseState.scaleRecordedSamples];
+  const now = performance.now();
+
+  const recordedDurationMs =
+    singStartedAt == null
+      ? scaleNotes.length * EXERCISE_SCALE_STEP_HOLD_MS
+      : Math.max(1, now - singStartedAt);
+
+  const targetDurationMs = scaleNotes.length * EXERCISE_SCALE_STEP_HOLD_MS;
+  const reviewDurationMs = Math.max(recordedDurationMs, targetDurationMs);
+
+  exerciseState.scaleReview = {
+    expectedSegments: scaleNotes.map((midi, index) => ({
+      midi,
+      startMs: index * EXERCISE_SCALE_STEP_HOLD_MS,
+      endMs: (index + 1) * EXERCISE_SCALE_STEP_HOLD_MS,
+    })),
+    actualSamples: scaleRecordedSamples,
+    durationMs: reviewDurationMs,
+    label: `${rootName} ${scaleTypeLabel}`,
+  };
+
+  clearExerciseTimers();
+  resetExerciseAttemptState();
+  setExerciseCountdownText('--');
+  setExerciseProgress(success ? 1 : 0);
+  setExercisePhaseText('Review');
+  setExerciseAttemptText(success ? 'Scale matched' : 'Scale attempt ended');
+
+  if (success) {
+    setExerciseFeedback(
+      `Success. You completed ${rootName} ${scaleTypeLabel} ascending with one-second holds.`,
+      'success',
+    );
+    setStatus('Exercise success', true);
+  } else {
+    const reasonText = failureReason
+      ? ` ${failureReason}`
+      : ' Try again and hold each scale degree for one full second.';
+    setExerciseFeedback(`Scale not completed.${reasonText}`, 'warning');
+    setStatus('Exercise try again', true);
+  }
+
+  setExerciseRevealText(`${rootName} ${scaleTypeLabel}`);
+}
+
+function updateScaleExercise(sample) {
+  if (
+    !exerciseState.active ||
+    exerciseState.selectedExercise !== 'match-scale' ||
+    exerciseState.phase !== 'scale-sing' ||
+    exerciseState.scaleNotes.length === 0
+  ) {
+    return;
+  }
+
+  const now = performance.now();
+  const currentIndex = clamp(
+    exerciseState.scaleStepIndex,
+    0,
+    exerciseState.scaleNotes.length - 1,
+  );
+  const targetMidi = exerciseState.scaleNotes[currentIndex];
+
+  if (exerciseState.scaleSingStartedAt != null) {
+    exerciseState.scaleRecordedSamples.push({
+      timeMs: now - exerciseState.scaleSingStartedAt,
+      midi: sample.midi,
+      confidence: sample.confidence,
+    });
+  }
+
+  const withinTolerance =
+    sample.confidence >= EXERCISE_MIN_CONFIDENCE &&
+    Math.abs(sample.midi - targetMidi) <= EXERCISE_MATCH_TOLERANCE;
+
+  if (withinTolerance) {
+    if (exerciseState.holdStartTime == null) {
+      exerciseState.holdStartTime = now;
+    }
+
+    exerciseState.lastInTuneTime = now;
+    const heldMs = now - exerciseState.holdStartTime;
+    const progress =
+      (currentIndex + heldMs / EXERCISE_SCALE_STEP_HOLD_MS) /
+      exerciseState.scaleNotes.length;
+    setExerciseProgress(progress);
+    setExerciseAttemptText(
+      `Degree ${currentIndex + 1}/${exerciseState.scaleNotes.length}: ${midiToNoteName(targetMidi)} (${(heldMs / 1000).toFixed(2)}s)`,
+    );
+    setExerciseFeedback(
+      'Hold the note steady, then move to the next scale degree.',
+      'neutral',
+    );
+
+    if (heldMs >= EXERCISE_SCALE_STEP_HOLD_MS) {
+      const nextIndex = currentIndex + 1;
+      exerciseState.scaleStepIndex = nextIndex;
+      exerciseState.holdStartTime = null;
+      exerciseState.lastInTuneTime = null;
+
+      if (nextIndex >= exerciseState.scaleNotes.length) {
+        finalizeScaleExerciseAttempt(true);
+        return;
+      }
+
+      const nextTarget = exerciseState.scaleNotes[nextIndex];
+      setExerciseAttemptText(
+        `Next degree ${nextIndex + 1}/${exerciseState.scaleNotes.length}: ${midiToNoteName(nextTarget)}`,
+      );
+      setExerciseFeedback(
+        'Move up to the next scale note and hold for one second.',
+        'neutral',
+      );
+    }
+
+    return;
+  }
+
+  if (
+    exerciseState.holdStartTime != null &&
+    exerciseState.lastInTuneTime != null &&
+    now - exerciseState.lastInTuneTime <= EXERCISE_HOLD_GRACE_MS
+  ) {
+    const heldMs = now - exerciseState.holdStartTime;
+    const progress =
+      (currentIndex + heldMs / EXERCISE_SCALE_STEP_HOLD_MS) /
+      exerciseState.scaleNotes.length;
+    setExerciseProgress(progress);
+    setExerciseAttemptText(
+      `Degree ${currentIndex + 1}/${exerciseState.scaleNotes.length}: ${midiToNoteName(targetMidi)} (${(heldMs / 1000).toFixed(2)}s)`,
+    );
+    setExerciseFeedback('Close. Keep this degree centered and steady.', 'neutral');
+    return;
+  }
+
+  exerciseState.holdStartTime = null;
+  exerciseState.lastInTuneTime = null;
+  setExerciseAttemptText(
+    `Degree ${currentIndex + 1}/${exerciseState.scaleNotes.length}: ${midiToNoteName(targetMidi)}`,
+  );
+  setExerciseFeedback(
+    `Find the target degree. ${describeDirectionFromTarget(sample.midi - targetMidi)}.`,
+    'neutral',
+  );
+
+  if (
+    exerciseState.scaleSingStartedAt != null &&
+    now - exerciseState.scaleSingStartedAt >= EXERCISE_SCALE_TOTAL_TIMEOUT_MS
+  ) {
+    finalizeScaleExerciseAttempt(
+      false,
+      'Time ran out before all scale degrees were completed.',
+    );
+  }
+}
+
+async function startScaleExercise() {
+  syncExerciseRangeFromInputs();
+  syncExerciseScaleTypeFromInput();
+
+  if (!running) {
+    await startAudio();
+  }
+
+  if (!running) {
+    return;
+  }
+
+  clearExerciseTimers();
+  resetExerciseAttemptState();
+  clearExerciseReview();
+
+  const rootMidi = chooseScaleRootMidi();
+  if (rootMidi == null) {
+    setExercisePhaseText('Idle');
+    setExerciseAttemptText('Range too narrow');
+    setExerciseFeedback(
+      'This range cannot fit a full ascending major scale. Raise the highest note or lower the lowest note.',
+      'warning',
+    );
+    setExerciseRevealText('--');
+    setExerciseProgress(0);
+    return;
+  }
+
+  const scaleNotes = buildScaleNotes(rootMidi, exerciseState.scaleType);
+
+  exerciseState.targetMidi = rootMidi;
+  exerciseState.active = true;
+  exerciseState.phase = 'scale-prompt';
+  exerciseState.scaleNotes = scaleNotes;
+  exerciseState.scaleStepIndex = 0;
+  exerciseState.scaleSingStartedAt = null;
+  exerciseState.scaleRecordedSamples = [];
+  exerciseState.lastDetectedSample = null;
+  exerciseState.holdStartTime = null;
+  exerciseState.lastInTuneTime = null;
+
+  setExerciseRevealText(
+    `${midiToNoteName(rootMidi)} ${SCALE_LABELS[exerciseState.scaleType] || 'Scale'}`,
+  );
+  setExerciseCountdownText('--');
+  setExerciseProgress(0);
+  setExercisePhaseText('Prompt');
+  setExerciseAttemptText('Listen to the tonic');
+  setExerciseFeedback(
+    `Tonic is ${midiToNoteName(rootMidi)}. Then sing each degree of the ascending major scale, holding each note for 1 second.`,
+    'neutral',
+  );
+  setExerciseLiveReadout(null);
+
+  setStatus('Scale tonic playing', true);
+  await playReferenceToneForDuration(rootMidi);
+
+  if (
+    !exerciseState.active ||
+    exerciseState.selectedExercise !== 'match-scale'
+  ) {
+    return;
+  }
+
+  exerciseState.phase = 'scale-sing';
+  exerciseState.scaleSingStartedAt = performance.now();
+  setExercisePhaseText('Sing scale');
+  setExerciseAttemptText(
+    `Degree 1/${scaleNotes.length}: ${midiToNoteName(scaleNotes[0])}`,
+  );
+  setExerciseFeedback(
+    'Start on the tonic and move upward one degree at a time.',
+    'neutral',
+  );
+  setStatus('Scale exercise listening', true);
 }
 
 function finalizePitchMatchingAttempt(success) {
@@ -1003,7 +1339,34 @@ function resizeCanvas() {
   canvasReady = true;
 }
 
+function getExerciseViewportBoundsIfActive() {
+  if (!exerciseState.active) {
+    return null;
+  }
+
+  const low = clamp(exerciseState.rangeLowMidi, VOCAL_LOW_MIDI, VOCAL_HIGH_MIDI);
+  const high = clamp(
+    exerciseState.rangeHighMidi,
+    VOCAL_LOW_MIDI,
+    VOCAL_HIGH_MIDI,
+  );
+
+  if (high <= low) {
+    return {
+      low: low - 0.5,
+      high: low + 0.5,
+    };
+  }
+
+  return { low, high };
+}
+
 function getViewportBounds(centerMidi) {
+  const exerciseBounds = getExerciseViewportBoundsIfActive();
+  if (exerciseBounds) {
+    return exerciseBounds;
+  }
+
   const halfWindow = VIEWPORT_SEMITONES / 2;
   return {
     low: centerMidi - halfWindow,
@@ -1198,6 +1561,11 @@ function getMidiFromCanvasPointer(event) {
 }
 
 function applyViewportShift(deltaSemitones) {
+  if (exerciseState.active) {
+    setStatus('Exercise range locked', true);
+    return;
+  }
+
   const lowerBound = VIEWPORT_MIN_CENTER_MIDI;
   const upperBound = VIEWPORT_MAX_CENTER_MIDI;
   viewportCenterMidi = clamp(
@@ -1474,6 +1842,69 @@ function drawHistory(ctx, width, height, now, centerMidi) {
   ctx.restore();
 }
 
+function drawScaleReviewOverlay(ctx, width, height, centerMidi) {
+  if (
+    !exerciseState.scaleReview ||
+    !exerciseState.scaleReview.expectedSegments ||
+    exerciseState.scaleReview.expectedSegments.length === 0
+  ) {
+    return;
+  }
+
+  const { expectedSegments, actualSamples, durationMs, label } =
+    exerciseState.scaleReview;
+  const leftRailWidth = 132 * devicePixelRatioValue;
+  const rightPadding = 20 * devicePixelRatioValue;
+  const trailWidth = Math.max(1, width - leftRailWidth - rightPadding);
+  const safeDuration = Math.max(1, durationMs);
+
+  ctx.save();
+  ctx.setLineDash([7 * devicePixelRatioValue, 5 * devicePixelRatioValue]);
+  ctx.strokeStyle = 'rgba(255, 214, 110, 0.92)';
+  ctx.lineWidth = 1.5 * devicePixelRatioValue;
+
+  for (const segment of expectedSegments) {
+    const y = midiToY(segment.midi, height, centerMidi);
+    const x1 = leftRailWidth + (segment.startMs / safeDuration) * trailWidth;
+    const x2 = leftRailWidth + (segment.endMs / safeDuration) * trailWidth;
+    const bandHalf = 7 * devicePixelRatioValue;
+    ctx.strokeRect(x1, y - bandHalf, Math.max(1, x2 - x1), bandHalf * 2);
+  }
+
+  ctx.setLineDash([]);
+
+  if (actualSamples && actualSamples.length > 1) {
+    ctx.beginPath();
+    ctx.strokeStyle = 'rgba(125, 240, 195, 0.78)';
+    ctx.lineWidth = 2 * devicePixelRatioValue;
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+
+    actualSamples.forEach((sample, index) => {
+      const x = leftRailWidth + (sample.timeMs / safeDuration) * trailWidth;
+      const y = midiToY(sample.midi, height, centerMidi);
+
+      if (index === 0) {
+        ctx.moveTo(x, y);
+      } else {
+        ctx.lineTo(x, y);
+      }
+    });
+
+    ctx.stroke();
+  }
+
+  ctx.fillStyle = 'rgba(255, 214, 110, 0.92)';
+  ctx.font = `${11 * devicePixelRatioValue}px Space Grotesk, sans-serif`;
+  ctx.textBaseline = 'top';
+  ctx.fillText(
+    `Target outline (${label})`,
+    leftRailWidth + 8 * devicePixelRatioValue,
+    10 * devicePixelRatioValue,
+  );
+  ctx.restore();
+}
+
 function render() {
   if (!canvasReady) {
     return;
@@ -1493,6 +1924,7 @@ function render() {
 
   drawBackground(context, width, height, viewportCenterMidi);
   drawHistory(context, width, height, now, viewportCenterMidi);
+  drawScaleReviewOverlay(context, width, height, viewportCenterMidi);
 
   animationFrameId = requestAnimationFrame(render);
 }
@@ -1705,6 +2137,8 @@ function updateFromAudio() {
     if (exerciseState.active) {
       if (exerciseState.selectedExercise === 'pitch-memory') {
         updatePitchMemoryExercise(sample);
+      } else if (exerciseState.selectedExercise === 'match-scale') {
+        updateScaleExercise(sample);
       } else {
         updatePitchMatchingExercise(sample);
       }
@@ -1717,6 +2151,8 @@ function updateFromAudio() {
     const expectsSingingNow =
       exerciseState.active &&
       (exerciseState.selectedExercise === 'pitch-matching' ||
+        (exerciseState.selectedExercise === 'match-scale' &&
+          exerciseState.phase === 'scale-sing') ||
         (exerciseState.selectedExercise === 'pitch-memory' &&
           exerciseState.phase === 'memory-sing'));
 
@@ -1750,6 +2186,19 @@ function updateFromAudio() {
       now >= exerciseState.memoryEvaluationEndTime
     ) {
       finalizePitchMemoryAttempt(false);
+    }
+
+    if (
+      exerciseState.active &&
+      exerciseState.selectedExercise === 'match-scale' &&
+      exerciseState.phase === 'scale-sing' &&
+      exerciseState.scaleSingStartedAt != null &&
+      now - exerciseState.scaleSingStartedAt >= EXERCISE_SCALE_TOTAL_TIMEOUT_MS
+    ) {
+      finalizeScaleExerciseAttempt(
+        false,
+        'Time ran out before all scale degrees were completed.',
+      );
     }
   }
 
@@ -1840,6 +2289,7 @@ function resetView() {
   setPitchDisplay(null);
   clearExerciseTimers();
   resetExerciseAttemptState();
+  clearExerciseReview();
   resetExerciseUi();
   setStatus(running ? 'Listening' : 'Mic idle', running);
 }
@@ -1887,6 +2337,10 @@ if (exerciseMemoryDelay) {
   );
 }
 
+if (exerciseScaleType) {
+  exerciseScaleType.addEventListener('change', syncExerciseScaleTypeFromInput);
+}
+
 if (exerciseType) {
   exerciseType.addEventListener('change', () => {
     setSelectedExercise(exerciseType.value);
@@ -1897,6 +2351,11 @@ if (exerciseStartButton) {
   exerciseStartButton.addEventListener('click', async () => {
     if (exerciseState.selectedExercise === 'pitch-memory') {
       await startPitchMemoryExercise();
+      return;
+    }
+
+    if (exerciseState.selectedExercise === 'match-scale') {
+      await startScaleExercise();
       return;
     }
 
@@ -1934,6 +2393,7 @@ setPitchDisplay(null);
 updateFollowToggleUi();
 populateExerciseRangeOptions();
 syncExerciseMemoryDelayFromInput();
+syncExerciseScaleTypeFromInput();
 setExerciseDetailsCollapsed(true);
 updateExercisePresetUi();
 resetExerciseUi();

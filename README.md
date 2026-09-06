@@ -51,6 +51,17 @@ Open Exercises, switch the Exercise selector to Pitch Memory, then:
 - Sing the remembered pitch on Go and hold it for one second to pass.
 - The app reveals the target note and reports success or try-again after each attempt.
 
+## Match the Scale
+
+Open Exercises, switch the Exercise selector to Match the Scale, then:
+
+- Set your lowest and highest comfortable notes.
+- Choose the scale type (currently Major).
+- Start the exercise to hear one tonic note.
+- Sing upward through the full scale, holding each degree in tune for one second.
+- The selected tonic is chosen so it is not below your low limit, and the top of the scale does not exceed your high limit.
+- When the attempt ends, the roll overlays target note outlines against your sung contour so you can see where each degree drifted.
+
 ## Notes
 
 - The app uses your microphone, so you will need to allow browser access when prompted.
