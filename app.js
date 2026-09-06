@@ -62,6 +62,14 @@ const exerciseScaleDirection = document.getElementById(
 const exerciseScaleDirectionField = document.getElementById(
   'exerciseScaleDirectionField',
 );
+const exerciseRandomTonicField = document.getElementById(
+  'exerciseRandomTonicField',
+);
+const exerciseRandomTonic = document.getElementById('exerciseRandomTonic');
+const exerciseFixedTonicField = document.getElementById(
+  'exerciseFixedTonicField',
+);
+const exerciseFixedTonic = document.getElementById('exerciseFixedTonic');
 const exerciseStartButton = document.getElementById('exerciseStartButton');
 const exerciseDetailsToggle = document.getElementById('exerciseDetailsToggle');
 const exerciseFeedback = document.getElementById('exerciseFeedback');
@@ -112,12 +120,15 @@ const EXERCISE_MATCH_TOLERANCE_CENTS = 35;
 const EXERCISE_MATCH_TOLERANCE = EXERCISE_MATCH_TOLERANCE_CENTS / 100;
 const EXERCISE_HOLD_GRACE_MS = 180;
 const EXERCISE_MIN_CONFIDENCE = 0.72;
+const EXERCISE_DEFAULT_DELAY_SECONDS = 3;
+const EXERCISE_MEMORY_DEFAULT_DELAY_SECONDS = 8;
 const EXERCISE_MEMORY_MIN_DELAY_SECONDS = 1;
 const EXERCISE_MEMORY_MAX_DELAY_SECONDS = 100;
 const EXERCISE_MEMORY_COUNTDOWN_SECONDS = 3;
 const EXERCISE_MEMORY_ATTEMPT_WINDOW_MS = 3000;
 const EXERCISE_SCALE_STEP_HOLD_MS = 1000;
 const EXERCISE_SCALE_TOTAL_TIMEOUT_MS = 36000;
+const RANDOM_SCALE_DEGREE_SCALE_TYPE = 'major';
 
 const SCALE_PATTERNS = {
   major: [0, 2, 4, 5, 7, 9, 11, 12],
@@ -158,6 +169,13 @@ const EXERCISE_PRESETS = {
       'Hear the tonic, then sing upward through each scale degree and hold every note for one second.',
     startLabel: 'Start match the scale',
   },
+  'random-scale-degree': {
+    badge: 'Scale exercise',
+    title: 'Random Scale Degree',
+    description:
+      'Hear a tonic, then sing the requested major scale degree and hold it for one second.',
+    startLabel: 'Start random scale degree',
+  },
 };
 
 const exerciseState = {
@@ -168,7 +186,7 @@ const exerciseState = {
   targetMidi: null,
   rangeLowMidi: 48,
   rangeHighMidi: 60,
-  memoryDelaySeconds: 8,
+  memoryDelaySeconds: EXERCISE_MEMORY_DEFAULT_DELAY_SECONDS,
   scaleType: 'major',
   scaleDirection: SCALE_DIRECTIONS.ascending,
   scaleNotes: [],
@@ -176,6 +194,10 @@ const exerciseState = {
   scaleSingStartedAt: null,
   scaleRecordedSamples: [],
   scaleReview: null,
+  randomDegreeTonicMidi: null,
+  randomDegreeNumber: null,
+  randomDegreeUseRandomTonic: true,
+  randomDegreeFixedTonicMidi: 60,
   memoryTimerId: null,
   memoryCountdownIntervalId: null,
   memoryCountdownHideTimerId: null,
@@ -190,6 +212,12 @@ const exerciseState = {
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
+}
+
+function waitMs(durationMs) {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, Math.max(0, durationMs));
+  });
 }
 
 function median(values) {
@@ -432,6 +460,62 @@ function syncExerciseRangeFromInputs() {
   if (highMidi !== exerciseState.rangeHighMidi) {
     exerciseHighNote.value = String(exerciseState.rangeHighMidi);
   }
+
+  populateRandomDegreeFixedTonicOptions();
+}
+
+function populateRandomDegreeFixedTonicOptions() {
+  if (!exerciseFixedTonic) {
+    return;
+  }
+
+  const options = [];
+  for (
+    let midi = exerciseState.rangeLowMidi;
+    midi <= exerciseState.rangeHighMidi;
+    midi += 1
+  ) {
+    options.push(`<option value="${midi}">${midiToNoteName(midi)}</option>`);
+  }
+
+  exerciseFixedTonic.innerHTML = options.join('');
+
+  const clamped = clamp(
+    exerciseState.randomDegreeFixedTonicMidi,
+    exerciseState.rangeLowMidi,
+    exerciseState.rangeHighMidi,
+  );
+  exerciseState.randomDegreeFixedTonicMidi = clamped;
+  exerciseFixedTonic.value = String(clamped);
+}
+
+function syncRandomDegreeUseRandomTonicFromInput() {
+  if (!exerciseRandomTonic) {
+    return;
+  }
+
+  exerciseState.randomDegreeUseRandomTonic = Boolean(
+    exerciseRandomTonic.checked,
+  );
+  updateExercisePresetUi();
+}
+
+function syncRandomDegreeFixedTonicFromInput() {
+  if (!exerciseFixedTonic) {
+    return;
+  }
+
+  const parsed = Number(exerciseFixedTonic.value);
+  const normalized = Math.round(
+    clamp(
+      Number.isFinite(parsed) ? parsed : exerciseState.rangeLowMidi,
+      exerciseState.rangeLowMidi,
+      exerciseState.rangeHighMidi,
+    ),
+  );
+
+  exerciseState.randomDegreeFixedTonicMidi = normalized;
+  exerciseFixedTonic.value = String(normalized);
 }
 
 function resetExerciseAttemptState() {
@@ -442,6 +526,8 @@ function resetExerciseAttemptState() {
   exerciseState.scaleStepIndex = 0;
   exerciseState.scaleSingStartedAt = null;
   exerciseState.scaleRecordedSamples = [];
+  exerciseState.randomDegreeTonicMidi = null;
+  exerciseState.randomDegreeNumber = null;
   exerciseState.memoryEvaluationEndTime = null;
   exerciseState.holdStartTime = null;
   exerciseState.lastInTuneTime = null;
@@ -529,6 +615,11 @@ function updateExercisePresetUi() {
     EXERCISE_PRESETS['pitch-matching'];
   const isPitchMemory = exerciseState.selectedExercise === 'pitch-memory';
   const isScaleMatch = exerciseState.selectedExercise === 'match-scale';
+  const isRandomScaleDegree =
+    exerciseState.selectedExercise === 'random-scale-degree';
+  const usesScaleSettings =
+    exerciseState.selectedExercise === 'match-scale' ||
+    exerciseState.selectedExercise === 'random-scale-degree';
 
   if (exerciseType && exerciseType.value !== exerciseState.selectedExercise) {
     exerciseType.value = exerciseState.selectedExercise;
@@ -555,11 +646,20 @@ function updateExercisePresetUi() {
   }
 
   if (exerciseScaleTypeField) {
-    exerciseScaleTypeField.hidden = !isScaleMatch;
+    exerciseScaleTypeField.hidden = !usesScaleSettings;
   }
 
   if (exerciseScaleDirectionField) {
     exerciseScaleDirectionField.hidden = !isScaleMatch;
+  }
+
+  if (exerciseRandomTonicField) {
+    exerciseRandomTonicField.hidden = !isRandomScaleDegree;
+  }
+
+  if (exerciseFixedTonicField) {
+    exerciseFixedTonicField.hidden =
+      !isRandomScaleDegree || exerciseState.randomDegreeUseRandomTonic;
   }
 
   if (
@@ -574,6 +674,17 @@ function updateExercisePresetUi() {
     exerciseScaleDirection.value !== exerciseState.scaleDirection
   ) {
     exerciseScaleDirection.value = exerciseState.scaleDirection;
+  }
+
+  if (exerciseRandomTonic) {
+    exerciseRandomTonic.checked = exerciseState.randomDegreeUseRandomTonic;
+  }
+
+  if (exerciseFixedTonic) {
+    const value = String(exerciseState.randomDegreeFixedTonicMidi);
+    if (exerciseFixedTonic.value !== value) {
+      exerciseFixedTonic.value = value;
+    }
   }
 
   if (!isPitchMemory) {
@@ -667,6 +778,71 @@ function buildScaleNotes(rootMidi, scaleType) {
     exerciseState.scaleDirection,
   );
   return offsets.map((offset) => rootMidi + offset);
+}
+
+function chooseRandomScaleDegreePrompt() {
+  const offsets = getScalePattern(RANDOM_SCALE_DEGREE_SCALE_TYPE);
+  const degreeCandidates = [];
+  const addCandidatesForTonic = (tonicMidi) => {
+    for (let index = 0; index < offsets.length; index += 1) {
+      const targetMidi = tonicMidi + offsets[index];
+
+      if (
+        targetMidi < exerciseState.rangeLowMidi ||
+        targetMidi > exerciseState.rangeHighMidi
+      ) {
+        continue;
+      }
+
+      degreeCandidates.push({
+        tonicMidi,
+        degreeNumber: index + 1,
+        targetMidi,
+      });
+    }
+  };
+
+  if (exerciseState.randomDegreeUseRandomTonic) {
+    for (
+      let tonicMidi = exerciseState.rangeLowMidi;
+      tonicMidi <= exerciseState.rangeHighMidi;
+      tonicMidi += 1
+    ) {
+      addCandidatesForTonic(tonicMidi);
+    }
+
+    if (degreeCandidates.length === 0) {
+      return {
+        error:
+          'This range cannot fit a tonic and target degree for the major scale. Widen your range and try again.',
+      };
+    }
+
+    const randomIndex = Math.floor(Math.random() * degreeCandidates.length);
+    return degreeCandidates[randomIndex];
+  }
+
+  const fixedTonicMidi = exerciseState.randomDegreeFixedTonicMidi;
+  if (
+    fixedTonicMidi < exerciseState.rangeLowMidi ||
+    fixedTonicMidi > exerciseState.rangeHighMidi
+  ) {
+    return {
+      error:
+        'The selected fixed tonic is outside your current exercise range. Choose a tonic within the range.',
+    };
+  }
+
+  addCandidatesForTonic(fixedTonicMidi);
+  if (degreeCandidates.length === 0) {
+    return {
+      error:
+        'No major-scale degree from the selected tonic stays inside this range. Pick another tonic or widen the range.',
+    };
+  }
+
+  const randomIndex = Math.floor(Math.random() * degreeCandidates.length);
+  return degreeCandidates[randomIndex];
 }
 
 async function playReferenceToneForDuration(midi, durationMs = 1200) {
@@ -766,16 +942,17 @@ async function startPitchMatchingExercise() {
   clearExerciseReview();
   exerciseState.targetMidi = chooseExerciseTargetMidi();
   exerciseState.active = true;
-  exerciseState.phase = 'matching-listening';
-  exerciseState.attemptStartedAt = performance.now();
+  exerciseState.phase = 'matching-prompt';
+  exerciseState.attemptStartedAt = null;
   exerciseState.lastResult = null;
   exerciseState.lastDetectedSample = null;
   exerciseState.lastInTuneTime = null;
+  exerciseState.holdStartTime = null;
 
-  setExerciseAttemptText('Listening for a match');
-  setExercisePhaseText('Prompt + matching');
+  setExerciseAttemptText('Listen to the prompt');
+  setExercisePhaseText('Prompt');
   setExerciseFeedback(
-    `Match the hidden tone within +/-${EXERCISE_MATCH_TOLERANCE_CENTS} cents and hold it for 1 second.`,
+    `Listen first, then match the hidden tone within +/-${EXERCISE_MATCH_TOLERANCE_CENTS} cents and hold it for 1 second.`,
     'neutral',
   );
   setExerciseRevealText('Hidden');
@@ -784,6 +961,38 @@ async function startPitchMatchingExercise() {
 
   setStatus('Exercise prompt playing', true);
   await replayExerciseTone();
+
+  if (
+    !exerciseState.active ||
+    exerciseState.selectedExercise !== 'pitch-matching'
+  ) {
+    return;
+  }
+
+  exerciseState.phase = 'matching-wait';
+  setExerciseAttemptText('Get ready');
+  setExercisePhaseText('Delay');
+  setExerciseFeedback(
+    `Starting in ${EXERCISE_DEFAULT_DELAY_SECONDS} seconds...`,
+    'neutral',
+  );
+  await waitMs(EXERCISE_DEFAULT_DELAY_SECONDS * 1000);
+
+  if (
+    !exerciseState.active ||
+    exerciseState.selectedExercise !== 'pitch-matching'
+  ) {
+    return;
+  }
+
+  exerciseState.phase = 'matching-listening';
+  exerciseState.attemptStartedAt = performance.now();
+  setExerciseAttemptText('Listening for a match');
+  setExercisePhaseText('Match');
+  setExerciseFeedback(
+    `Match the hidden tone now and hold for 1 second.`,
+    'neutral',
+  );
 }
 
 function finalizePitchMemoryAttempt(success) {
@@ -1178,6 +1387,22 @@ async function startScaleExercise() {
     return;
   }
 
+  exerciseState.phase = 'scale-wait';
+  setExercisePhaseText('Delay');
+  setExerciseAttemptText('Get ready');
+  setExerciseFeedback(
+    `Scale starts in ${EXERCISE_DEFAULT_DELAY_SECONDS} seconds...`,
+    'neutral',
+  );
+  await waitMs(EXERCISE_DEFAULT_DELAY_SECONDS * 1000);
+
+  if (
+    !exerciseState.active ||
+    exerciseState.selectedExercise !== 'match-scale'
+  ) {
+    return;
+  }
+
   exerciseState.phase = 'scale-sing';
   exerciseState.scaleSingStartedAt = performance.now();
   setExercisePhaseText('Sing scale');
@@ -1191,6 +1416,207 @@ async function startScaleExercise() {
     'neutral',
   );
   setStatus('Scale exercise listening', true);
+}
+
+function finalizeRandomScaleDegreeAttempt(success) {
+  const tonicMidi = exerciseState.randomDegreeTonicMidi;
+  const degreeNumber = exerciseState.randomDegreeNumber;
+  const targetMidi = exerciseState.targetMidi;
+  const targetNote = targetMidi != null ? midiToNoteName(targetMidi) : '--';
+  const tonicNote = tonicMidi != null ? midiToNoteName(tonicMidi) : '--';
+  const detectedSample = exerciseState.lastDetectedSample;
+  const attemptSummary = detectedSample
+    ? ` Your closest stable note was ${midiToNoteName(detectedSample.midi)} at ${detectedSample.frequency.toFixed(1)} Hz.`
+    : ' No stable sung note was detected during the attempt.';
+
+  clearExerciseTimers();
+  resetExerciseAttemptState();
+  setExerciseCountdownText('--');
+  setExerciseProgress(success ? 1 : 0);
+  setExercisePhaseText('Complete');
+  setExerciseAttemptText(success ? 'Correct' : 'Incorrect');
+
+  if (success) {
+    setExerciseFeedback(
+      `Correct. Degree ${degreeNumber} from ${tonicNote} is ${targetNote}.`,
+      'success',
+    );
+    setStatus('Exercise success', true);
+  } else {
+    setExerciseFeedback(
+      `Incorrect. Degree ${degreeNumber} from ${tonicNote} is ${targetNote}.${attemptSummary}`,
+      'warning',
+    );
+    setStatus('Exercise try again', true);
+  }
+
+  setExerciseRevealText(`Degree ${degreeNumber} -> ${targetNote}`);
+}
+
+function updateRandomScaleDegreeExercise(sample) {
+  if (
+    !exerciseState.active ||
+    exerciseState.selectedExercise !== 'random-scale-degree' ||
+    exerciseState.targetMidi == null ||
+    exerciseState.phase !== 'random-degree-sing'
+  ) {
+    return;
+  }
+
+  const now = performance.now();
+  exerciseState.lastDetectedSample = {
+    frequency: sample.frequency,
+    midi: sample.midi,
+    confidence: sample.confidence,
+  };
+
+  const withinTolerance =
+    sample.confidence >= EXERCISE_MIN_CONFIDENCE &&
+    Math.abs(sample.midi - exerciseState.targetMidi) <=
+      EXERCISE_MATCH_TOLERANCE;
+
+  if (withinTolerance) {
+    if (exerciseState.holdStartTime == null) {
+      exerciseState.holdStartTime = now;
+    }
+
+    exerciseState.lastInTuneTime = now;
+    const heldMs = now - exerciseState.holdStartTime;
+    setExerciseAttemptText(`Hold steady: ${(heldMs / 1000).toFixed(2)}s`);
+    setExerciseFeedback(
+      'Keep holding the target degree until the bar fills.',
+      'neutral',
+    );
+    setExerciseProgress(heldMs / EXERCISE_SUCCESS_HOLD_MS);
+
+    if (heldMs >= EXERCISE_SUCCESS_HOLD_MS) {
+      finalizeRandomScaleDegreeAttempt(true);
+    }
+
+    return;
+  }
+
+  if (
+    exerciseState.holdStartTime != null &&
+    exerciseState.lastInTuneTime != null &&
+    now - exerciseState.lastInTuneTime <= EXERCISE_HOLD_GRACE_MS
+  ) {
+    const heldMs = now - exerciseState.holdStartTime;
+    setExerciseAttemptText(`Hold steady: ${(heldMs / 1000).toFixed(2)}s`);
+    setExerciseFeedback(
+      'Close. Keep the degree centered and steady.',
+      'neutral',
+    );
+    setExerciseProgress(heldMs / EXERCISE_SUCCESS_HOLD_MS);
+
+    if (heldMs >= EXERCISE_SUCCESS_HOLD_MS) {
+      finalizeRandomScaleDegreeAttempt(true);
+    }
+
+    return;
+  }
+
+  exerciseState.holdStartTime = null;
+  exerciseState.lastInTuneTime = null;
+  setExerciseProgress(0);
+  setExerciseAttemptText('Searching for the target degree');
+  setExerciseFeedback(
+    `Try to land the requested degree. ${describeDirectionFromTarget(sample.midi - exerciseState.targetMidi)}.`,
+    'neutral',
+  );
+
+  if (now - exerciseState.attemptStartedAt >= EXERCISE_ATTEMPT_WINDOW_MS) {
+    finalizeRandomScaleDegreeAttempt(false);
+  }
+}
+
+async function startRandomScaleDegreeExercise() {
+  syncExerciseRangeFromInputs();
+
+  if (!running) {
+    await startAudio();
+  }
+
+  if (!running) {
+    return;
+  }
+
+  clearExerciseTimers();
+  resetExerciseAttemptState();
+  clearExerciseReview();
+
+  const prompt = chooseRandomScaleDegreePrompt();
+  if (!prompt || prompt.error) {
+    setExercisePhaseText('Idle');
+    setExerciseAttemptText('Range too narrow');
+    setExerciseFeedback(
+      prompt?.error ||
+        'This range cannot fit a tonic and target degree for the major scale. Widen your range and try again.',
+      'warning',
+    );
+    setExerciseRevealText('--');
+    setExerciseProgress(0);
+    return;
+  }
+
+  exerciseState.active = true;
+  exerciseState.phase = 'random-degree-prompt';
+  exerciseState.targetMidi = prompt.targetMidi;
+  exerciseState.randomDegreeTonicMidi = prompt.tonicMidi;
+  exerciseState.randomDegreeNumber = prompt.degreeNumber;
+  exerciseState.lastDetectedSample = null;
+  exerciseState.holdStartTime = null;
+  exerciseState.lastInTuneTime = null;
+  exerciseState.attemptStartedAt = null;
+
+  setExerciseRevealText(`Degree ${prompt.degreeNumber}`);
+  setExerciseCountdownText('--');
+  setExerciseProgress(0);
+  setExercisePhaseText('Prompt');
+  setExerciseAttemptText('Listen to the tonic');
+  setExerciseFeedback(
+    exerciseState.randomDegreeUseRandomTonic
+      ? `Tonic is ${midiToNoteName(prompt.tonicMidi)}. Sing scale degree ${prompt.degreeNumber} and hold for 1 second.`
+      : `Fixed tonic is ${midiToNoteName(prompt.tonicMidi)}. Sing scale degree ${prompt.degreeNumber} and hold for 1 second.`,
+    'neutral',
+  );
+  setExerciseLiveReadout(null);
+
+  setStatus('Scale tonic playing', true);
+  await playReferenceToneForDuration(prompt.tonicMidi);
+
+  if (
+    !exerciseState.active ||
+    exerciseState.selectedExercise !== 'random-scale-degree'
+  ) {
+    return;
+  }
+
+  exerciseState.phase = 'random-degree-wait';
+  setExercisePhaseText('Delay');
+  setExerciseAttemptText('Get ready');
+  setExerciseFeedback(
+    `Sing degree ${prompt.degreeNumber} in ${EXERCISE_DEFAULT_DELAY_SECONDS} seconds...`,
+    'neutral',
+  );
+  await waitMs(EXERCISE_DEFAULT_DELAY_SECONDS * 1000);
+
+  if (
+    !exerciseState.active ||
+    exerciseState.selectedExercise !== 'random-scale-degree'
+  ) {
+    return;
+  }
+
+  exerciseState.phase = 'random-degree-sing';
+  exerciseState.attemptStartedAt = performance.now();
+  setExercisePhaseText('Sing degree');
+  setExerciseAttemptText(`Sing degree ${prompt.degreeNumber}`);
+  setExerciseFeedback(
+    'Match the requested degree and hold for one second.',
+    'neutral',
+  );
+  setStatus('Random degree listening', true);
 }
 
 function finalizePitchMatchingAttempt(success) {
@@ -1219,7 +1645,11 @@ function finalizePitchMatchingAttempt(success) {
 }
 
 function updatePitchMatchingExercise(sample) {
-  if (!exerciseState.active || exerciseState.targetMidi == null) {
+  if (
+    !exerciseState.active ||
+    exerciseState.targetMidi == null ||
+    exerciseState.phase !== 'matching-listening'
+  ) {
     return;
   }
 
@@ -2235,6 +2665,8 @@ function updateFromAudio() {
         updatePitchMemoryExercise(sample);
       } else if (exerciseState.selectedExercise === 'match-scale') {
         updateScaleExercise(sample);
+      } else if (exerciseState.selectedExercise === 'random-scale-degree') {
+        updateRandomScaleDegreeExercise(sample);
       } else {
         updatePitchMatchingExercise(sample);
       }
@@ -2247,6 +2679,8 @@ function updateFromAudio() {
     const expectsSingingNow =
       exerciseState.active &&
       (exerciseState.selectedExercise === 'pitch-matching' ||
+        (exerciseState.selectedExercise === 'random-scale-degree' &&
+          exerciseState.phase === 'random-degree-sing') ||
         (exerciseState.selectedExercise === 'match-scale' &&
           exerciseState.phase === 'scale-sing') ||
         (exerciseState.selectedExercise === 'pitch-memory' &&
@@ -2272,6 +2706,16 @@ function updateFromAudio() {
       now - exerciseState.attemptStartedAt >= EXERCISE_ATTEMPT_WINDOW_MS
     ) {
       finalizePitchMatchingAttempt(false);
+    }
+
+    if (
+      exerciseState.active &&
+      exerciseState.selectedExercise === 'random-scale-degree' &&
+      exerciseState.phase === 'random-degree-sing' &&
+      exerciseState.attemptStartedAt != null &&
+      now - exerciseState.attemptStartedAt >= EXERCISE_ATTEMPT_WINDOW_MS
+    ) {
+      finalizeRandomScaleDegreeAttempt(false);
     }
 
     if (
@@ -2444,6 +2888,20 @@ if (exerciseScaleDirection) {
   );
 }
 
+if (exerciseRandomTonic) {
+  exerciseRandomTonic.addEventListener(
+    'change',
+    syncRandomDegreeUseRandomTonicFromInput,
+  );
+}
+
+if (exerciseFixedTonic) {
+  exerciseFixedTonic.addEventListener(
+    'change',
+    syncRandomDegreeFixedTonicFromInput,
+  );
+}
+
 if (exerciseType) {
   exerciseType.addEventListener('change', () => {
     setSelectedExercise(exerciseType.value);
@@ -2454,6 +2912,11 @@ if (exerciseStartButton) {
   exerciseStartButton.addEventListener('click', async () => {
     if (exerciseState.selectedExercise === 'pitch-memory') {
       await startPitchMemoryExercise();
+      return;
+    }
+
+    if (exerciseState.selectedExercise === 'random-scale-degree') {
+      await startRandomScaleDegreeExercise();
       return;
     }
 
@@ -2495,12 +2958,16 @@ resizeCanvas();
 setPitchDisplay(null);
 updateFollowToggleUi();
 populateExerciseRangeOptions();
+populateRandomDegreeFixedTonicOptions();
 syncExerciseMemoryDelayFromInput();
 syncExerciseScaleTypeFromInput();
 syncExerciseScaleDirectionFromInput();
+syncRandomDegreeUseRandomTonicFromInput();
+syncRandomDegreeFixedTonicFromInput();
 setExerciseDetailsCollapsed(true);
 updateExercisePresetUi();
 resetExerciseUi();
+setExercisePanelOpen(true);
 setStatus('Mic idle');
 render();
 

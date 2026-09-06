@@ -327,6 +327,12 @@ body::before {
   font: inherit;
 }
 
+.exercise-field input[type='checkbox'] {
+  width: 20px;
+  height: 20px;
+  accent-color: var(--accent);
+}
+
 .exercise-actions {
   display: flex;
   flex-wrap: wrap;

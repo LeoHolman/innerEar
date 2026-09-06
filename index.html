@@ -172,6 +172,7 @@
                       <option value="pitch-matching">Pitch Matching</option>
                       <option value="pitch-memory">Pitch Memory</option>
                       <option value="match-scale">Match the Scale</option>
+                      <option value="random-scale-degree">Random Scale Degree</option>
                     </select>
                   </label>
                 </div>
@@ -244,6 +245,26 @@
                       <option value="ascending">Ascending</option>
                       <option value="descending">Descending</option>
                     </select>
+                  </label>
+                  <label
+                    class="exercise-field exercise-field--wide"
+                    id="exerciseRandomTonicField"
+                    hidden
+                  >
+                    <span>Random tonic</span>
+                    <input
+                      id="exerciseRandomTonic"
+                      type="checkbox"
+                      checked
+                    />
+                  </label>
+                  <label
+                    class="exercise-field"
+                    id="exerciseFixedTonicField"
+                    hidden
+                  >
+                    <span>Fixed tonic</span>
+                    <select id="exerciseFixedTonic"></select>
                   </label>
                 </div>
               </div>
