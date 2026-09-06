@@ -62,7 +62,7 @@ body::before {
   gap: 22px;
   width: min(1180px, calc(100vw - 32px));
   margin: 0 auto;
-  padding: 24px 0 28px;
+  padding: 24px 0 12px;
 }
 
 .hero-card,
@@ -551,7 +551,7 @@ body::before {
 
 .roll-stage {
   position: relative;
-  min-height: clamp(480px, 68vh, 860px);
+  min-height: calc(100vh - 56px);
   overflow: hidden;
   border-radius: 24px;
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -667,7 +667,7 @@ body::before {
 @media (max-width: 640px) {
   .app-shell {
     width: min(100vw - 20px, 1180px);
-    padding-top: 12px;
+    padding: 12px 0 10px;
   }
 
   .hero-card,
@@ -677,7 +677,7 @@ body::before {
   }
 
   .roll-stage {
-    min-height: 68vh;
+    min-height: calc(100vh - 40px);
   }
 
   .exercise-config-grid {
