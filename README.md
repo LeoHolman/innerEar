@@ -27,8 +27,18 @@ You can also use any other local static file server, as long as it serves the fi
 ## What you should see
 
 - A microphone start/stop button
+- An Exercises button with a Pitch Matching preset
 - Live note, frequency, and cents readouts
 - A vertical piano-roll visualization with note guide lines
+
+## Pitch Matching
+
+Open Exercises to launch Pitch Matching.
+
+- Set the lowest and highest notes you can comfortably sing.
+- Start the exercise to hear a hidden prompt tone chosen from that range.
+- Sing the pitch back and hold it steadily for one second to succeed.
+- After each attempt, the app reveals the target note and gives success or try-again feedback.
 
 ## Notes
 

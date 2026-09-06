@@ -29,6 +29,8 @@ const canvas = document.getElementById('pianoRoll');
 const toggleButton = document.getElementById('toggleButton');
 const resetButton = document.getElementById('resetButton');
 const followToggleButton = document.getElementById('followToggleButton');
+const exerciseToggleButton = document.getElementById('exerciseToggleButton');
+const rollLayout = document.getElementById('rollLayout');
 const statusPill = document.getElementById('statusPill');
 const noteName = document.getElementById('noteName');
 const frequencyLabel = document.getElementById('frequency');
@@ -38,6 +40,21 @@ const stabilityLabel = document.getElementById('stabilityLabel');
 const currentChip = document.getElementById('currentChip');
 const referenceVolume = document.getElementById('referenceVolume');
 const referenceVolumeValue = document.getElementById('referenceVolumeValue');
+const exercisePanel = document.getElementById('exercisePanel');
+const exerciseLowNote = document.getElementById('exerciseLowNote');
+const exerciseHighNote = document.getElementById('exerciseHighNote');
+const exerciseStartButton = document.getElementById('exerciseStartButton');
+const exerciseReplayButton = document.getElementById('exerciseReplayButton');
+const exerciseFeedback = document.getElementById('exerciseFeedback');
+const exerciseReveal = document.getElementById('exerciseReveal');
+const exerciseProgressFill = document.getElementById('exerciseProgressFill');
+const exerciseAttemptLabel = document.getElementById('exerciseAttemptLabel');
+const exerciseCurrentNote = document.getElementById('exerciseCurrentNote');
+const exerciseCurrentFrequency = document.getElementById(
+  'exerciseCurrentFrequency',
+);
+const exerciseCurrentDelta = document.getElementById('exerciseCurrentDelta');
+const exerciseLiveStatus = document.getElementById('exerciseLiveStatus');
 
 const context = canvas.getContext('2d');
 
@@ -64,6 +81,25 @@ const REFERENCE_LOW_MIDI = 24;
 const REFERENCE_HIGH_MIDI = 96;
 const VIEWPORT_MIN_CENTER_MIDI = 30;
 const VIEWPORT_MAX_CENTER_MIDI = 90;
+const EXERCISE_RANGE_LOW_MIDI = 36;
+const EXERCISE_RANGE_HIGH_MIDI = 84;
+const EXERCISE_SUCCESS_HOLD_MS = 1000;
+const EXERCISE_ATTEMPT_WINDOW_MS = 8000;
+const EXERCISE_MATCH_TOLERANCE = 0.45;
+const EXERCISE_MIN_CONFIDENCE = 0.72;
+
+const exerciseState = {
+  panelOpen: false,
+  selectedExercise: 'pitch-matching',
+  active: false,
+  targetMidi: null,
+  rangeLowMidi: 48,
+  rangeHighMidi: 60,
+  holdStartTime: null,
+  attemptStartedAt: null,
+  lastResult: null,
+  lastDetectedSample: null,
+};
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
@@ -103,6 +139,368 @@ function midiToCents(midi) {
   return Math.round((midi - Math.round(midi)) * 100);
 }
 
+function getExerciseSelectableMidis() {
+  const midis = [];
+
+  for (
+    let midi = EXERCISE_RANGE_LOW_MIDI;
+    midi <= EXERCISE_RANGE_HIGH_MIDI;
+    midi += 1
+  ) {
+    midis.push(midi);
+  }
+
+  return midis;
+}
+
+function populateExerciseRangeOptions() {
+  if (!exerciseLowNote || !exerciseHighNote) {
+    return;
+  }
+
+  const options = getExerciseSelectableMidis()
+    .map((midi) => `<option value="${midi}">${midiToNoteName(midi)}</option>`)
+    .join('');
+
+  exerciseLowNote.innerHTML = options;
+  exerciseHighNote.innerHTML = options;
+  exerciseLowNote.value = String(exerciseState.rangeLowMidi);
+  exerciseHighNote.value = String(exerciseState.rangeHighMidi);
+}
+
+function setExercisePanelOpen(isOpen) {
+  if (!exercisePanel || !exerciseToggleButton) {
+    return;
+  }
+
+  exerciseState.panelOpen = Boolean(isOpen);
+  exercisePanel.hidden = !exerciseState.panelOpen;
+  exerciseToggleButton.setAttribute(
+    'aria-expanded',
+    exerciseState.panelOpen ? 'true' : 'false',
+  );
+  exerciseToggleButton.classList.toggle('is-active', exerciseState.panelOpen);
+
+  if (rollLayout) {
+    rollLayout.classList.toggle('is-exercise-open', exerciseState.panelOpen);
+  }
+}
+
+function describeDirectionFromTarget(deltaSemitones) {
+  if (Math.abs(deltaSemitones) <= EXERCISE_MATCH_TOLERANCE) {
+    return 'On target';
+  }
+
+  if (deltaSemitones < 0) {
+    return `Too low by ${Math.abs(deltaSemitones).toFixed(2)} semitones`;
+  }
+
+  return `Too high by ${deltaSemitones.toFixed(2)} semitones`;
+}
+
+function setExerciseLiveReadout(sample) {
+  if (
+    !exerciseCurrentNote ||
+    !exerciseCurrentFrequency ||
+    !exerciseCurrentDelta ||
+    !exerciseLiveStatus
+  ) {
+    return;
+  }
+
+  if (!sample) {
+    exerciseCurrentNote.textContent = '--';
+    exerciseCurrentFrequency.textContent = '--';
+    exerciseCurrentDelta.textContent =
+      'Current match guidance: waiting for a stable sung note';
+    exerciseLiveStatus.textContent = 'Waiting';
+    return;
+  }
+
+  exerciseCurrentNote.textContent = midiToNoteName(sample.midi);
+  exerciseCurrentFrequency.textContent = `${sample.frequency.toFixed(sample.frequency >= 100 ? 1 : 2)} Hz`;
+  exerciseLiveStatus.textContent =
+    sample.confidence >= EXERCISE_MIN_CONFIDENCE ? 'Stable' : 'Searching';
+
+  if (exerciseState.targetMidi == null) {
+    exerciseCurrentDelta.textContent =
+      'Current match guidance: exercise not running';
+    return;
+  }
+
+  const deltaSemitones = sample.midi - exerciseState.targetMidi;
+  exerciseCurrentDelta.textContent = `Current match guidance: ${describeDirectionFromTarget(deltaSemitones)}`;
+}
+
+function setExerciseFeedback(message, tone = 'neutral') {
+  if (!exerciseFeedback) {
+    return;
+  }
+
+  exerciseFeedback.textContent = message;
+  exerciseFeedback.dataset.tone = tone;
+}
+
+function setExerciseRevealText(message) {
+  if (!exerciseReveal) {
+    return;
+  }
+
+  exerciseReveal.textContent = message;
+}
+
+function setExerciseProgress(progress) {
+  if (!exerciseProgressFill) {
+    return;
+  }
+
+  exerciseProgressFill.style.width = `${clamp(progress * 100, 0, 100)}%`;
+}
+
+function setExerciseAttemptText(message) {
+  if (!exerciseAttemptLabel) {
+    return;
+  }
+
+  exerciseAttemptLabel.textContent = message;
+}
+
+function syncExerciseRangeFromInputs() {
+  if (!exerciseLowNote || !exerciseHighNote) {
+    return;
+  }
+
+  const lowMidi = Number(exerciseLowNote.value);
+  const highMidi = Number(exerciseHighNote.value);
+
+  exerciseState.rangeLowMidi = Math.min(lowMidi, highMidi);
+  exerciseState.rangeHighMidi = Math.max(lowMidi, highMidi);
+
+  if (lowMidi !== exerciseState.rangeLowMidi) {
+    exerciseLowNote.value = String(exerciseState.rangeLowMidi);
+  }
+
+  if (highMidi !== exerciseState.rangeHighMidi) {
+    exerciseHighNote.value = String(exerciseState.rangeHighMidi);
+  }
+}
+
+function resetExerciseAttemptState() {
+  exerciseState.active = false;
+  exerciseState.targetMidi = null;
+  exerciseState.holdStartTime = null;
+  exerciseState.attemptStartedAt = null;
+  exerciseState.lastDetectedSample = null;
+}
+
+function updateExerciseButtons() {
+  if (exerciseReplayButton) {
+    exerciseReplayButton.disabled = exerciseState.targetMidi == null;
+  }
+}
+
+function resetExerciseUi() {
+  setExerciseAttemptText('Idle');
+  setExerciseFeedback('Select your range and start when you are ready.');
+  setExerciseRevealText('Note reveal: --');
+  setExerciseProgress(0);
+  setExerciseLiveReadout(null);
+  updateExerciseButtons();
+}
+
+function chooseExerciseTargetMidi() {
+  const range = exerciseState.rangeHighMidi - exerciseState.rangeLowMidi + 1;
+  return (
+    exerciseState.rangeLowMidi + Math.floor(Math.random() * Math.max(1, range))
+  );
+}
+
+async function playReferenceToneForDuration(midi, durationMs = 1200) {
+  const roundedMidi = Math.round(
+    clamp(midi, REFERENCE_LOW_MIDI, REFERENCE_HIGH_MIDI),
+  );
+  const frequency = midiToFrequency(roundedMidi);
+
+  stopSustainedReferenceTone();
+
+  const ctx = getReferenceAudioContext();
+  if (ctx.state === 'suspended') {
+    await ctx.resume();
+  }
+
+  const now = ctx.currentTime;
+  const stopAt = now + durationMs / 1000;
+  const mixGain = ctx.createGain();
+  const filter = ctx.createBiquadFilter();
+  const oscillators = [
+    ctx.createOscillator(),
+    ctx.createOscillator(),
+    ctx.createOscillator(),
+  ];
+  const partialGains = [ctx.createGain(), ctx.createGain(), ctx.createGain()];
+
+  filter.type = 'lowpass';
+  filter.frequency.setValueAtTime(3400, now);
+  filter.Q.setValueAtTime(0.9, now);
+
+  partialGains[0].gain.setValueAtTime(0.85, now);
+  partialGains[1].gain.setValueAtTime(0.23, now);
+  partialGains[2].gain.setValueAtTime(0.14, now);
+
+  oscillators[0].type = 'triangle';
+  oscillators[0].frequency.setValueAtTime(frequency, now);
+  oscillators[1].type = 'sine';
+  oscillators[1].frequency.setValueAtTime(frequency * 2, now);
+  oscillators[2].type = 'sine';
+  oscillators[2].frequency.setValueAtTime(frequency * 3, now);
+
+  mixGain.gain.setValueAtTime(0.0001, now);
+  mixGain.gain.exponentialRampToValueAtTime(0.3, now + 0.02);
+  mixGain.gain.setValueAtTime(0.24, Math.max(now + 0.06, stopAt - 0.18));
+  mixGain.gain.exponentialRampToValueAtTime(0.0001, stopAt);
+
+  for (let index = 0; index < oscillators.length; index += 1) {
+    oscillators[index].connect(partialGains[index]);
+    partialGains[index].connect(mixGain);
+    oscillators[index].start(now);
+    oscillators[index].stop(stopAt + 0.02);
+  }
+
+  mixGain.connect(filter);
+  filter.connect(referenceMasterGain);
+
+  window.setTimeout(() => {
+    for (const oscillator of oscillators) {
+      oscillator.disconnect();
+    }
+    for (const gainNode of partialGains) {
+      gainNode.disconnect();
+    }
+    mixGain.disconnect();
+    filter.disconnect();
+  }, durationMs + 180);
+}
+
+async function replayExerciseTone() {
+  if (exerciseState.targetMidi == null) {
+    return;
+  }
+
+  try {
+    await playReferenceToneForDuration(exerciseState.targetMidi);
+  } catch {
+    setExerciseFeedback(
+      'Audio playback was blocked. Tap again to replay.',
+      'warning',
+    );
+  }
+}
+
+async function startPitchMatchingExercise() {
+  syncExerciseRangeFromInputs();
+
+  if (!running) {
+    await startAudio();
+  }
+
+  if (!running) {
+    return;
+  }
+
+  resetExerciseAttemptState();
+  exerciseState.targetMidi = chooseExerciseTargetMidi();
+  exerciseState.active = true;
+  exerciseState.attemptStartedAt = performance.now();
+  exerciseState.lastResult = null;
+  exerciseState.lastDetectedSample = null;
+
+  setExerciseAttemptText('Listening for a match');
+  setExerciseFeedback(
+    'Match the hidden tone and hold it steady for 1 second.',
+    'neutral',
+  );
+  setExerciseRevealText('Note reveal: Hidden until the attempt ends');
+  setExerciseProgress(0);
+  setExerciseLiveReadout(null);
+  updateExerciseButtons();
+
+  setStatus('Exercise prompt playing', true);
+  await replayExerciseTone();
+}
+
+function finalizePitchMatchingAttempt(success) {
+  if (exerciseState.targetMidi == null) {
+    return;
+  }
+
+  const revealedNote = midiToNoteName(exerciseState.targetMidi);
+  const detectedSample = exerciseState.lastDetectedSample;
+  const attemptSummary = detectedSample
+    ? ` You were closest to ${midiToNoteName(detectedSample.midi)} at ${detectedSample.frequency.toFixed(1)} Hz.`
+    : ' No stable sung note was detected during the attempt.';
+  const message = success
+    ? `Success. You matched ${revealedNote} for 1 second.`
+    : `Try again. The target note was ${revealedNote}.${attemptSummary}`;
+
+  resetExerciseAttemptState();
+  setExerciseProgress(success ? 1 : 0);
+  setExerciseAttemptText(success ? 'Matched' : 'Try again');
+  setExerciseFeedback(message, success ? 'success' : 'warning');
+  setExerciseRevealText(`Note reveal: ${revealedNote}`);
+  setStatus(success ? 'Exercise success' : 'Exercise try again', true);
+  updateExerciseButtons();
+}
+
+function updatePitchMatchingExercise(sample) {
+  if (!exerciseState.active || exerciseState.targetMidi == null) {
+    return;
+  }
+
+  const now = performance.now();
+  exerciseState.lastDetectedSample = {
+    frequency: sample.frequency,
+    midi: sample.midi,
+    confidence: sample.confidence,
+  };
+  const withinTolerance =
+    sample.confidence >= EXERCISE_MIN_CONFIDENCE &&
+    Math.abs(sample.midi - exerciseState.targetMidi) <=
+      EXERCISE_MATCH_TOLERANCE;
+  const deltaSemitones = sample.midi - exerciseState.targetMidi;
+
+  if (withinTolerance) {
+    if (exerciseState.holdStartTime == null) {
+      exerciseState.holdStartTime = now;
+    }
+
+    const heldMs = now - exerciseState.holdStartTime;
+    setExerciseAttemptText(`Hold steady: ${(heldMs / 1000).toFixed(2)}s`);
+    setExerciseFeedback(
+      'Keep holding the pitch steady until the bar fills.',
+      'neutral',
+    );
+    setExerciseProgress(heldMs / EXERCISE_SUCCESS_HOLD_MS);
+
+    if (heldMs >= EXERCISE_SUCCESS_HOLD_MS) {
+      finalizePitchMatchingAttempt(true);
+    }
+
+    return;
+  }
+
+  exerciseState.holdStartTime = null;
+  setExerciseProgress(0);
+  setExerciseAttemptText('Searching for the target');
+  setExerciseFeedback(
+    `Try to center on the prompt pitch and sustain it. ${describeDirectionFromTarget(deltaSemitones)}.`,
+    'neutral',
+  );
+
+  if (now - exerciseState.attemptStartedAt >= EXERCISE_ATTEMPT_WINDOW_MS) {
+    finalizePitchMatchingAttempt(false);
+  }
+}
+
 function setStatus(text, emphasis = false) {
   statusPill.textContent = text;
   statusPill.style.color = emphasis ? 'var(--accent)' : 'var(--muted)';
@@ -116,6 +514,7 @@ function setPitchDisplay(sample) {
     currentChip.textContent = '--';
     stabilityLabel.textContent = 'Waiting for input';
     meterFill.style.width = '0%';
+    setExerciseLiveReadout(null);
     return;
   }
 
@@ -131,6 +530,7 @@ function setPitchDisplay(sample) {
         ? 'Stable'
         : 'Searching';
   meterFill.style.width = `${clamp(sample.confidence * 100, 0, 100)}%`;
+  setExerciseLiveReadout(sample);
 }
 
 function updateFollowToggleUi() {
@@ -867,10 +1267,31 @@ function updateFromAudio() {
     };
 
     pitchHistory.push(sample);
+    updatePitchMatchingExercise(sample);
     setPitchDisplay(sample);
-    setStatus('Listening', true);
+    if (!exerciseState.active) {
+      setStatus('Listening', true);
+    }
   } else if (performance.now() % 1000 < 25) {
-    setStatus('Listening for pitch...');
+    if (exerciseState.active) {
+      setExerciseLiveReadout(null);
+      setExerciseAttemptText('Waiting for a stable note');
+      setExerciseFeedback(
+        'Sing the prompt pitch clearly so the tracker can lock on.',
+        'neutral',
+      );
+    } else {
+      setStatus('Listening for pitch...');
+    }
+
+    if (
+      exerciseState.active &&
+      exerciseState.attemptStartedAt != null &&
+      performance.now() - exerciseState.attemptStartedAt >=
+        EXERCISE_ATTEMPT_WINDOW_MS
+    ) {
+      finalizePitchMatchingAttempt(false);
+    }
   }
 
   pitchHistory = pitchHistory.filter(
@@ -888,6 +1309,7 @@ function stopAudio() {
   pitchHistory = [];
   recentMidiSamples = [];
   recentRawMidiSamples = [];
+  resetExerciseAttemptState();
 
   if (animationFrameId) {
     cancelAnimationFrame(animationFrameId);
@@ -956,6 +1378,8 @@ function resetView() {
   stopSustainedReferenceTone();
   activeReferencePointerId = null;
   setPitchDisplay(null);
+  resetExerciseAttemptState();
+  resetExerciseUi();
   setStatus(running ? 'Listening' : 'Mic idle', running);
 }
 
@@ -977,6 +1401,29 @@ if (followToggleButton) {
       followPitchEnabled ? 'Pitch follow enabled' : 'Pitch follow paused',
       true,
     );
+  });
+}
+
+if (exerciseToggleButton) {
+  exerciseToggleButton.addEventListener('click', () => {
+    setExercisePanelOpen(!exerciseState.panelOpen);
+  });
+}
+
+if (exerciseLowNote && exerciseHighNote) {
+  exerciseLowNote.addEventListener('change', syncExerciseRangeFromInputs);
+  exerciseHighNote.addEventListener('change', syncExerciseRangeFromInputs);
+}
+
+if (exerciseStartButton) {
+  exerciseStartButton.addEventListener('click', async () => {
+    await startPitchMatchingExercise();
+  });
+}
+
+if (exerciseReplayButton) {
+  exerciseReplayButton.addEventListener('click', async () => {
+    await replayExerciseTone();
   });
 }
 
@@ -1002,6 +1449,8 @@ window.addEventListener('resize', () => {
 resizeCanvas();
 setPitchDisplay(null);
 updateFollowToggleUi();
+populateExerciseRangeOptions();
+resetExerciseUi();
 setStatus('Mic idle');
 render();
 

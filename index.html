@@ -72,6 +72,15 @@
           >
             Follow pitch: Off
           </button>
+          <button
+            id="exerciseToggleButton"
+            class="secondary-button"
+            type="button"
+            aria-expanded="false"
+            aria-controls="exercisePanel"
+          >
+            Exercises
+          </button>
           <div
             class="status-pill"
             id="statusPill"
@@ -91,6 +100,7 @@
             <span id="referenceVolumeValue">56%</span>
           </div>
         </div>
+
       </section>
 
       <section class="roll-card">
@@ -111,18 +121,119 @@
           </p>
         </div>
 
-        <div class="roll-stage">
-          <canvas
-            id="pianoRoll"
-            aria-label="Live scrolling piano roll"
-          ></canvas>
-          <div class="roll-overlay">
-            <div
-              class="current-note-chip"
-              id="currentChip"
-            >
-              --
+        <div
+          class="roll-layout"
+          id="rollLayout"
+        >
+          <div class="roll-stage">
+            <canvas
+              id="pianoRoll"
+              aria-label="Live scrolling piano roll"
+            ></canvas>
+            <div class="roll-overlay">
+              <div
+                class="current-note-chip"
+                id="currentChip"
+              >
+                --
+              </div>
             </div>
+          </div>
+
+          <aside
+            class="exercise-panel"
+            id="exercisePanel"
+            hidden
+          >
+            <div class="exercise-card is-selected">
+              <div class="exercise-card-copy">
+                <p class="panel-label">Exercise library</p>
+                <span class="exercise-badge">Preset exercise</span>
+                <p class="exercise-title">Pitch Matching</p>
+                <p class="exercise-description">
+                  Choose the comfortable range you want to practice in, then sing
+                  the prompt tone back without seeing the note name first.
+                </p>
+              </div>
+
+              <div class="exercise-config-grid">
+                <label class="exercise-field">
+                  <span>Lowest note</span>
+                  <select id="exerciseLowNote"></select>
+                </label>
+                <label class="exercise-field">
+                  <span>Highest note</span>
+                  <select id="exerciseHighNote"></select>
+                </label>
+                <div class="exercise-actions">
+                  <button
+                    id="exerciseStartButton"
+                    class="primary-button"
+                    type="button"
+                  >
+                    Start pitch matching
+                  </button>
+                  <button
+                    id="exerciseReplayButton"
+                    class="secondary-button"
+                    type="button"
+                    disabled
+                  >
+                    Replay tone
+                  </button>
+                </div>
+              </div>
+
+              <div class="exercise-live-card">
+                <div class="exercise-status-head">
+                  <span class="panel-label">What you are singing</span>
+                  <span id="exerciseLiveStatus">Waiting</span>
+                </div>
+                <div class="exercise-live-grid">
+                  <article class="exercise-live-stat">
+                    <span class="stat-label">Note</span>
+                    <strong id="exerciseCurrentNote">--</strong>
+                  </article>
+                  <article class="exercise-live-stat">
+                    <span class="stat-label">Frequency</span>
+                    <strong id="exerciseCurrentFrequency">--</strong>
+                  </article>
+                </div>
+                <p
+                  class="exercise-guidance"
+                  id="exerciseCurrentDelta"
+                >
+                  Current match guidance: --
+                </p>
+              </div>
+
+              <div class="exercise-status-card">
+                <div class="exercise-status-head">
+                  <span class="panel-label">Exercise status</span>
+                  <span id="exerciseAttemptLabel">Idle</span>
+                </div>
+                <p
+                  class="exercise-feedback"
+                  id="exerciseFeedback"
+                >
+                  Select your range and start when you are ready.
+                </p>
+                <div class="exercise-progress-track">
+                  <div
+                    class="exercise-progress-fill"
+                    id="exerciseProgressFill"
+                  ></div>
+                </div>
+                <p
+                  class="exercise-reveal"
+                  id="exerciseReveal"
+                  aria-live="polite"
+                >
+                  Note reveal: --
+                </p>
+              </div>
+            </div>
+          </aside>
           </div>
         </div>
       </section>
