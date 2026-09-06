@@ -26,6 +26,7 @@ const MAX_DETECT_HZ = 1000;
 const canvas = document.getElementById('pianoRoll');
 const toggleButton = document.getElementById('toggleButton');
 const resetButton = document.getElementById('resetButton');
+const followToggleButton = document.getElementById('followToggleButton');
 const statusPill = document.getElementById('statusPill');
 const noteName = document.getElementById('noteName');
 const frequencyLabel = document.getElementById('frequency');
@@ -33,10 +34,15 @@ const centsLabel = document.getElementById('cents');
 const meterFill = document.getElementById('meterFill');
 const stabilityLabel = document.getElementById('stabilityLabel');
 const currentChip = document.getElementById('currentChip');
+const referenceVolume = document.getElementById('referenceVolume');
+const referenceVolumeValue = document.getElementById('referenceVolumeValue');
 
 const context = canvas.getContext('2d');
 
 let audioContext = null;
+let referenceAudioContext = null;
+let referenceMasterGain = null;
+let activeReferenceVoice = null;
 let analyser = null;
 let sourceNode = null;
 let stream = null;
@@ -45,9 +51,16 @@ let devicePixelRatioValue = Math.max(1, window.devicePixelRatio || 1);
 let running = false;
 let canvasReady = false;
 let viewportCenterMidi = 60;
+let followPitchEnabled = true;
 let lastStableMidi = null;
 let pitchHistory = [];
 let recentMidiSamples = [];
+let activeReferencePointerId = null;
+
+const REFERENCE_LOW_MIDI = 24;
+const REFERENCE_HIGH_MIDI = 96;
+const VIEWPORT_MIN_CENTER_MIDI = 30;
+const VIEWPORT_MAX_CENTER_MIDI = 90;
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
@@ -117,6 +130,33 @@ function setPitchDisplay(sample) {
   meterFill.style.width = `${clamp(sample.confidence * 100, 0, 100)}%`;
 }
 
+function updateFollowToggleUi() {
+  if (!followToggleButton) {
+    return;
+  }
+
+  followToggleButton.textContent = `Follow pitch: ${followPitchEnabled ? 'On' : 'Off'}`;
+  followToggleButton.setAttribute(
+    'aria-pressed',
+    followPitchEnabled ? 'true' : 'false',
+  );
+  followToggleButton.classList.toggle('is-active', followPitchEnabled);
+}
+
+function setFollowPitchEnabled(enabled) {
+  followPitchEnabled = Boolean(enabled);
+
+  if (followPitchEnabled && lastStableMidi != null) {
+    viewportCenterMidi = clamp(
+      lastStableMidi,
+      VIEWPORT_MIN_CENTER_MIDI,
+      VIEWPORT_MAX_CENTER_MIDI,
+    );
+  }
+
+  updateFollowToggleUi();
+}
+
 function resizeCanvas() {
   const rect = canvas.parentElement.getBoundingClientRect();
   devicePixelRatioValue = Math.max(1, window.devicePixelRatio || 1);
@@ -146,6 +186,271 @@ function midiToY(midi, height, centerMidi) {
     clamp(normalized, 0, 1) * drawableHeight
   );
 }
+
+function yToMidi(y, height, centerMidi) {
+  const { low, high } = getViewportBounds(centerMidi);
+  const top = TOP_GAP * devicePixelRatioValue;
+  const bottom = height - BOTTOM_GAP * devicePixelRatioValue;
+  const clampedY = clamp(y, top, bottom);
+  const drawableHeight = Math.max(1, bottom - top);
+  const normalized = (bottom - clampedY) / drawableHeight;
+  return low + normalized * (high - low);
+}
+
+function getReferenceAudioContext() {
+  if (!referenceAudioContext || referenceAudioContext.state === 'closed') {
+    referenceAudioContext = new AudioContext();
+    referenceMasterGain = referenceAudioContext.createGain();
+    referenceMasterGain.connect(referenceAudioContext.destination);
+    applyReferenceVolume();
+  }
+
+  return referenceAudioContext;
+}
+
+function getReferenceVolumeScalar() {
+  const percent = Number(referenceVolume?.value ?? 56);
+  const normalized = clamp(percent / 100, 0, 1);
+  return 0.04 + Math.pow(normalized, 1.3) * 0.56;
+}
+
+function applyReferenceVolume() {
+  if (!referenceMasterGain || !referenceAudioContext) {
+    return;
+  }
+
+  const now = referenceAudioContext.currentTime;
+  const target = getReferenceVolumeScalar();
+  referenceMasterGain.gain.cancelScheduledValues(now);
+  referenceMasterGain.gain.setTargetAtTime(target, now, 0.02);
+}
+
+function setReferenceVolumeLabel() {
+  if (!referenceVolumeValue || !referenceVolume) {
+    return;
+  }
+
+  referenceVolumeValue.textContent = `${referenceVolume.value}%`;
+}
+
+function stopSustainedReferenceTone() {
+  if (!activeReferenceVoice) {
+    return;
+  }
+
+  const { ctx, mixGain, oscillators, cleanup } = activeReferenceVoice;
+  const now = ctx.currentTime;
+  const currentGain = Math.max(0.0001, mixGain.gain.value || 0.0001);
+  mixGain.gain.cancelScheduledValues(now);
+  mixGain.gain.setValueAtTime(currentGain, now);
+  mixGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.16);
+
+  const stopAt = now + 0.19;
+  for (const osc of oscillators) {
+    try {
+      osc.stop(stopAt);
+    } catch {
+      // Oscillator may already be stopping.
+    }
+  }
+
+  activeReferenceVoice = null;
+  window.setTimeout(() => {
+    cleanup();
+  }, 260);
+}
+
+async function startSustainedReferenceTone(midi) {
+  const roundedMidi = Math.round(
+    clamp(midi, REFERENCE_LOW_MIDI, REFERENCE_HIGH_MIDI),
+  );
+  const frequency = midiToFrequency(roundedMidi);
+
+  try {
+    const ctx = getReferenceAudioContext();
+    if (ctx.state === 'suspended') {
+      await ctx.resume();
+    }
+
+    stopSustainedReferenceTone();
+
+    const now = ctx.currentTime;
+    const mixGain = ctx.createGain();
+    const filter = ctx.createBiquadFilter();
+    const oscFundamental = ctx.createOscillator();
+    const oscOctave = ctx.createOscillator();
+    const oscTwelfth = ctx.createOscillator();
+    const gainFundamental = ctx.createGain();
+    const gainOctave = ctx.createGain();
+    const gainTwelfth = ctx.createGain();
+
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(3400, now);
+    filter.Q.setValueAtTime(0.9, now);
+
+    gainFundamental.gain.setValueAtTime(0.85, now);
+    gainOctave.gain.setValueAtTime(0.23, now);
+    gainTwelfth.gain.setValueAtTime(0.14, now);
+
+    mixGain.gain.setValueAtTime(0.0001, now);
+    mixGain.gain.exponentialRampToValueAtTime(0.32, now + 0.012);
+    mixGain.gain.exponentialRampToValueAtTime(0.22, now + 0.08);
+
+    oscFundamental.type = 'triangle';
+    oscFundamental.frequency.setValueAtTime(frequency, now);
+
+    oscOctave.type = 'sine';
+    oscOctave.frequency.setValueAtTime(frequency * 2, now);
+
+    oscTwelfth.type = 'sine';
+    oscTwelfth.frequency.setValueAtTime(frequency * 3, now);
+
+    oscFundamental.connect(gainFundamental);
+    oscOctave.connect(gainOctave);
+    oscTwelfth.connect(gainTwelfth);
+    gainFundamental.connect(mixGain);
+    gainOctave.connect(mixGain);
+    gainTwelfth.connect(mixGain);
+    mixGain.connect(filter);
+    filter.connect(referenceMasterGain);
+
+    oscFundamental.start(now);
+    oscOctave.start(now);
+    oscTwelfth.start(now);
+
+    const cleanup = () => {
+      oscFundamental.disconnect();
+      oscOctave.disconnect();
+      oscTwelfth.disconnect();
+      gainFundamental.disconnect();
+      gainOctave.disconnect();
+      gainTwelfth.disconnect();
+      mixGain.disconnect();
+      filter.disconnect();
+    };
+
+    activeReferenceVoice = {
+      midi: roundedMidi,
+      ctx,
+      mixGain,
+      oscillators: [oscFundamental, oscOctave, oscTwelfth],
+      cleanup,
+    };
+
+    currentChip.textContent = `Reference: ${midiToNoteName(roundedMidi)} · ${frequency.toFixed(1)} Hz`;
+    setStatus('Reference tone playing', true);
+  } catch {
+    setStatus('Tap/click blocked audio');
+  }
+}
+
+function getMidiFromCanvasPointer(event) {
+  if (!canvasReady) {
+    return null;
+  }
+
+  const rect = canvas.getBoundingClientRect();
+  const cssY = event.clientY - rect.top;
+  const canvasY = cssY * devicePixelRatioValue;
+  const activeCenterMidi =
+    followPitchEnabled && lastStableMidi != null
+      ? lastStableMidi
+      : viewportCenterMidi;
+  return yToMidi(canvasY, canvas.height, activeCenterMidi);
+}
+
+function applyViewportShift(deltaSemitones) {
+  const lowerBound = VIEWPORT_MIN_CENTER_MIDI;
+  const upperBound = VIEWPORT_MAX_CENTER_MIDI;
+  viewportCenterMidi = clamp(
+    viewportCenterMidi + deltaSemitones,
+    lowerBound,
+    upperBound,
+  );
+  lastStableMidi = null;
+
+  if (!running) {
+    currentChip.textContent = `View center: ${midiToNoteName(viewportCenterMidi)}`;
+    setStatus('Scroll to choose your starting note');
+  } else if (!followPitchEnabled) {
+    setStatus('Manual roll position', true);
+  }
+}
+
+function handleCanvasWheel(event) {
+  event.preventDefault();
+
+  const semitoneDelta = clamp(event.deltaY, -160, 160) * 0.012;
+  applyViewportShift(semitoneDelta);
+}
+
+async function handleCanvasPointerDown(event) {
+  if (event.button !== undefined && event.button !== 0) {
+    return;
+  }
+
+  const targetMidi = getMidiFromCanvasPointer(event);
+  if (targetMidi == null) {
+    return;
+  }
+
+  activeReferencePointerId = event.pointerId;
+  canvas.setPointerCapture(event.pointerId);
+  await startSustainedReferenceTone(targetMidi);
+  event.preventDefault();
+}
+
+async function handleCanvasPointerMove(event) {
+  if (
+    activeReferencePointerId == null ||
+    event.pointerId !== activeReferencePointerId
+  ) {
+    return;
+  }
+
+  const targetMidi = getMidiFromCanvasPointer(event);
+  if (targetMidi == null || !activeReferenceVoice) {
+    return;
+  }
+
+  const rounded = Math.round(
+    clamp(targetMidi, REFERENCE_LOW_MIDI, REFERENCE_HIGH_MIDI),
+  );
+
+  if (rounded !== activeReferenceVoice.midi) {
+    await startSustainedReferenceTone(rounded);
+  }
+}
+
+function endReferencePointer(pointerId) {
+  if (activeReferencePointerId == null || pointerId !== activeReferencePointerId) {
+    return;
+  }
+
+  stopSustainedReferenceTone();
+  activeReferencePointerId = null;
+  setStatus(running ? 'Listening' : 'Mic idle', running);
+
+  if (!running) {
+    currentChip.textContent = '--';
+  }
+}
+
+function handleCanvasPointerUp(event) {
+  endReferencePointer(event.pointerId);
+}
+
+function handleCanvasPointerCancel(event) {
+  endReferencePointer(event.pointerId);
+}
+
+function handleCanvasPointerLeave(event) {
+  if (event.buttons === 0) {
+    endReferencePointer(event.pointerId);
+  }
+}
+
+
 
 function foldMidiToReference(
   midi,
@@ -213,6 +518,40 @@ function drawBackground(ctx, width, height, centerMidi) {
   ctx.fillRect(0, 0, leftRailWidth, height);
 
   const { low, high } = getViewportBounds(centerMidi);
+  const activeReferenceMidi = activeReferenceVoice?.midi ?? null;
+  const keyStartMidi = Math.floor(low) - 1;
+  const keyEndMidi = Math.ceil(high) + 1;
+
+  for (let midi = keyStartMidi; midi <= keyEndMidi; midi += 1) {
+    const noteClass = ((midi % 12) + 12) % 12;
+    const isNatural = [0, 2, 4, 5, 7, 9, 11].includes(noteClass);
+    const isActive = activeReferenceMidi != null && midi === activeReferenceMidi;
+    const keyTop = midiToY(midi + 0.5, height, centerMidi);
+    const keyBottom = midiToY(midi - 0.5, height, centerMidi);
+    const keyY = Math.min(keyTop, keyBottom);
+    const keyHeight = Math.max(1, Math.abs(keyBottom - keyTop));
+    const keyWidth = isNatural
+      ? leftRailWidth - 8 * devicePixelRatioValue
+      : (leftRailWidth - 22 * devicePixelRatioValue) * 0.72;
+
+    ctx.fillStyle = isActive
+      ? 'rgba(125, 240, 195, 0.5)'
+      : isNatural
+        ? 'rgba(224, 235, 255, 0.18)'
+        : 'rgba(8, 14, 26, 0.68)';
+    ctx.fillRect(0, keyY, keyWidth, keyHeight);
+
+    if (isActive) {
+      ctx.fillStyle = 'rgba(125, 240, 195, 0.98)';
+      ctx.fillRect(
+        keyWidth - 3 * devicePixelRatioValue,
+        keyY,
+        3 * devicePixelRatioValue,
+        keyHeight,
+      );
+    }
+  }
+
   const startMidi = Math.floor(low);
   const endMidi = Math.ceil(high);
 
@@ -297,9 +636,14 @@ function render() {
   const width = canvas.width;
   const height = canvas.height;
   const now = performance.now();
-  const activeCenterMidi = lastStableMidi ?? viewportCenterMidi;
-
-  viewportCenterMidi = viewportCenterMidi * 0.9 + activeCenterMidi * 0.1;
+  if (followPitchEnabled && lastStableMidi != null) {
+    const followedMidi = clamp(
+      lastStableMidi,
+      VIEWPORT_MIN_CENTER_MIDI,
+      VIEWPORT_MAX_CENTER_MIDI,
+    );
+    viewportCenterMidi = viewportCenterMidi * 0.9 + followedMidi * 0.1;
+  }
 
   drawBackground(context, width, height, viewportCenterMidi);
   drawHistory(context, width, height, now, viewportCenterMidi);
@@ -473,7 +817,14 @@ function updateFromAudio() {
     const stabilizedMidi = stabilizeMidi(rawMidi, result.confidence);
     const displayMidi = smoothMidiForTrail(stabilizedMidi);
     lastStableMidi = stabilizedMidi;
-    viewportCenterMidi = viewportCenterMidi * 0.88 + stabilizedMidi * 0.12;
+    if (followPitchEnabled) {
+      const boundedStable = clamp(
+        stabilizedMidi,
+        VIEWPORT_MIN_CENTER_MIDI,
+        VIEWPORT_MAX_CENTER_MIDI,
+      );
+      viewportCenterMidi = viewportCenterMidi * 0.88 + boundedStable * 0.12;
+    }
 
     const sample = {
       time: performance.now(),
@@ -523,6 +874,8 @@ function stopAudio() {
     audioContext.close().catch(() => {});
   }
 
+  stopSustainedReferenceTone();
+
   stream = null;
   analyser = null;
   sourceNode = null;
@@ -570,6 +923,8 @@ function resetView() {
   lastStableMidi = null;
   viewportCenterMidi = 60;
   recentMidiSamples = [];
+  stopSustainedReferenceTone();
+  activeReferencePointerId = null;
   setPitchDisplay(null);
   setStatus(running ? 'Listening' : 'Mic idle', running);
 }
@@ -584,12 +939,39 @@ toggleButton.addEventListener('click', async () => {
 });
 
 resetButton.addEventListener('click', resetView);
+
+if (followToggleButton) {
+  followToggleButton.addEventListener('click', () => {
+    setFollowPitchEnabled(!followPitchEnabled);
+    setStatus(
+      followPitchEnabled ? 'Pitch follow enabled' : 'Pitch follow paused',
+      true,
+    );
+  });
+}
+
+canvas.addEventListener('pointerdown', handleCanvasPointerDown);
+canvas.addEventListener('pointermove', handleCanvasPointerMove);
+canvas.addEventListener('pointerup', handleCanvasPointerUp);
+canvas.addEventListener('pointercancel', handleCanvasPointerCancel);
+canvas.addEventListener('pointerleave', handleCanvasPointerLeave);
+canvas.addEventListener('wheel', handleCanvasWheel, { passive: false });
+
+if (referenceVolume) {
+  setReferenceVolumeLabel();
+  referenceVolume.addEventListener('input', () => {
+    setReferenceVolumeLabel();
+    applyReferenceVolume();
+  });
+}
+
 window.addEventListener('resize', () => {
   resizeCanvas();
 });
 
 resizeCanvas();
 setPitchDisplay(null);
+updateFollowToggleUi();
 setStatus('Mic idle');
 render();
 

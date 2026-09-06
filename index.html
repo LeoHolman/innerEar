@@ -64,11 +64,31 @@
           >
             Reset view
           </button>
+          <button
+            id="followToggleButton"
+            class="secondary-button is-active"
+            type="button"
+            aria-pressed="true"
+          >
+            Follow pitch: On
+          </button>
           <div
             class="status-pill"
             id="statusPill"
           >
             Mic idle
+          </div>
+          <div class="reference-controls">
+            <label for="referenceVolume">Reference volume</label>
+            <input
+              id="referenceVolume"
+              type="range"
+              min="0"
+              max="100"
+              value="56"
+              step="1"
+            />
+            <span id="referenceVolumeValue">56%</span>
           </div>
         </div>
       </section>
@@ -82,6 +102,12 @@
           <p class="panel-note">
             The display centers on one octave at a time so the current note
             stays easy to read.
+          </p>
+          <p class="panel-note">
+            Hold click or touch on a note line to sustain a reference tone.
+          </p>
+          <p class="panel-note">
+            Scroll on the roll before singing to move the note window.
           </p>
         </div>
 
