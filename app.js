@@ -87,7 +87,9 @@ const EXERCISE_RANGE_LOW_MIDI = 36;
 const EXERCISE_RANGE_HIGH_MIDI = 84;
 const EXERCISE_SUCCESS_HOLD_MS = 1000;
 const EXERCISE_ATTEMPT_WINDOW_MS = 8000;
-const EXERCISE_MATCH_TOLERANCE = 0.45;
+const EXERCISE_MATCH_TOLERANCE_CENTS = 35;
+const EXERCISE_MATCH_TOLERANCE = EXERCISE_MATCH_TOLERANCE_CENTS / 100;
+const EXERCISE_HOLD_GRACE_MS = 180;
 const EXERCISE_MIN_CONFIDENCE = 0.72;
 
 const exerciseState = {
@@ -98,6 +100,7 @@ const exerciseState = {
   rangeLowMidi: 48,
   rangeHighMidi: 60,
   holdStartTime: null,
+  lastInTuneTime: null,
   attemptStartedAt: null,
   lastResult: null,
   lastDetectedSample: null,
@@ -322,6 +325,7 @@ function resetExerciseAttemptState() {
   exerciseState.active = false;
   exerciseState.targetMidi = null;
   exerciseState.holdStartTime = null;
+  exerciseState.lastInTuneTime = null;
   exerciseState.attemptStartedAt = null;
   exerciseState.lastDetectedSample = null;
 }
@@ -446,10 +450,11 @@ async function startPitchMatchingExercise() {
   exerciseState.attemptStartedAt = performance.now();
   exerciseState.lastResult = null;
   exerciseState.lastDetectedSample = null;
+  exerciseState.lastInTuneTime = null;
 
   setExerciseAttemptText('Listening for a match');
   setExerciseFeedback(
-    'Match the hidden tone and hold it steady for 1 second.',
+    `Match the hidden tone within +/-${EXERCISE_MATCH_TOLERANCE_CENTS} cents and hold it for 1 second.`,
     'neutral',
   );
   setExerciseRevealText('Hidden');
@@ -505,6 +510,7 @@ function updatePitchMatchingExercise(sample) {
     if (exerciseState.holdStartTime == null) {
       exerciseState.holdStartTime = now;
     }
+    exerciseState.lastInTuneTime = now;
 
     const heldMs = now - exerciseState.holdStartTime;
     setExerciseAttemptText(`Hold steady: ${(heldMs / 1000).toFixed(2)}s`);
@@ -521,7 +527,28 @@ function updatePitchMatchingExercise(sample) {
     return;
   }
 
+  if (
+    exerciseState.holdStartTime != null &&
+    exerciseState.lastInTuneTime != null &&
+    now - exerciseState.lastInTuneTime <= EXERCISE_HOLD_GRACE_MS
+  ) {
+    const heldMs = now - exerciseState.holdStartTime;
+    setExerciseAttemptText(`Hold steady: ${(heldMs / 1000).toFixed(2)}s`);
+    setExerciseFeedback(
+      'Close enough. Keep the pitch centered and steady.',
+      'neutral',
+    );
+    setExerciseProgress(heldMs / EXERCISE_SUCCESS_HOLD_MS);
+
+    if (heldMs >= EXERCISE_SUCCESS_HOLD_MS) {
+      finalizePitchMatchingAttempt(true);
+    }
+
+    return;
+  }
+
   exerciseState.holdStartTime = null;
+  exerciseState.lastInTuneTime = null;
   setExerciseProgress(0);
   setExerciseAttemptText('Searching for the target');
   setExerciseFeedback(

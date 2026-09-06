@@ -37,7 +37,7 @@ Open Exercises to launch Pitch Matching.
 
 - Set the lowest and highest notes you can comfortably sing.
 - Start the exercise to hear a hidden prompt tone chosen from that range.
-- Sing the pitch back and hold it steadily for one second to succeed.
+- Sing the pitch back within about +/-35 cents of the target and hold it steadily for one second to succeed.
 - After each attempt, the app reveals the target note and gives success or try-again feedback.
 
 ## Notes
