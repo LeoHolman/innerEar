@@ -41,10 +41,12 @@ const currentChip = document.getElementById('currentChip');
 const referenceVolume = document.getElementById('referenceVolume');
 const referenceVolumeValue = document.getElementById('referenceVolumeValue');
 const exercisePanel = document.getElementById('exercisePanel');
+const exerciseDetails = document.getElementById('exerciseDetails');
 const exerciseLowNote = document.getElementById('exerciseLowNote');
 const exerciseHighNote = document.getElementById('exerciseHighNote');
 const exerciseStartButton = document.getElementById('exerciseStartButton');
 const exerciseReplayButton = document.getElementById('exerciseReplayButton');
+const exerciseDetailsToggle = document.getElementById('exerciseDetailsToggle');
 const exerciseFeedback = document.getElementById('exerciseFeedback');
 const exerciseReveal = document.getElementById('exerciseReveal');
 const exerciseProgressFill = document.getElementById('exerciseProgressFill');
@@ -99,6 +101,7 @@ const exerciseState = {
   attemptStartedAt: null,
   lastResult: null,
   lastDetectedSample: null,
+  detailsCollapsed: false,
 };
 
 function clamp(value, min, max) {
@@ -174,6 +177,11 @@ function setExercisePanelOpen(isOpen) {
   }
 
   exerciseState.panelOpen = Boolean(isOpen);
+
+  if (exerciseState.panelOpen) {
+    setExerciseDetailsCollapsed(true);
+  }
+
   exercisePanel.hidden = !exerciseState.panelOpen;
   exerciseToggleButton.setAttribute(
     'aria-expanded',
@@ -183,6 +191,31 @@ function setExercisePanelOpen(isOpen) {
 
   if (rollLayout) {
     rollLayout.classList.toggle('is-exercise-open', exerciseState.panelOpen);
+  }
+}
+
+function setExerciseDetailsCollapsed(isCollapsed) {
+  exerciseState.detailsCollapsed = Boolean(isCollapsed);
+
+  if (exercisePanel) {
+    exercisePanel.classList.toggle(
+      'is-details-collapsed',
+      exerciseState.detailsCollapsed,
+    );
+  }
+
+  if (exerciseDetails) {
+    exerciseDetails.hidden = exerciseState.detailsCollapsed;
+  }
+
+  if (exerciseDetailsToggle) {
+    exerciseDetailsToggle.textContent = exerciseState.detailsCollapsed
+      ? 'Show explanation'
+      : 'Hide explanation';
+    exerciseDetailsToggle.setAttribute(
+      'aria-expanded',
+      exerciseState.detailsCollapsed ? 'false' : 'true',
+    );
   }
 }
 
@@ -302,7 +335,7 @@ function updateExerciseButtons() {
 function resetExerciseUi() {
   setExerciseAttemptText('Idle');
   setExerciseFeedback('Select your range and start when you are ready.');
-  setExerciseRevealText('Note reveal: --');
+  setExerciseRevealText('--');
   setExerciseProgress(0);
   setExerciseLiveReadout(null);
   updateExerciseButtons();
@@ -419,7 +452,7 @@ async function startPitchMatchingExercise() {
     'Match the hidden tone and hold it steady for 1 second.',
     'neutral',
   );
-  setExerciseRevealText('Note reveal: Hidden until the attempt ends');
+  setExerciseRevealText('Hidden');
   setExerciseProgress(0);
   setExerciseLiveReadout(null);
   updateExerciseButtons();
@@ -446,7 +479,7 @@ function finalizePitchMatchingAttempt(success) {
   setExerciseProgress(success ? 1 : 0);
   setExerciseAttemptText(success ? 'Matched' : 'Try again');
   setExerciseFeedback(message, success ? 'success' : 'warning');
-  setExerciseRevealText(`Note reveal: ${revealedNote}`);
+  setExerciseRevealText(revealedNote);
   setStatus(success ? 'Exercise success' : 'Exercise try again', true);
   updateExerciseButtons();
 }
@@ -1421,6 +1454,12 @@ if (exerciseStartButton) {
   });
 }
 
+if (exerciseDetailsToggle) {
+  exerciseDetailsToggle.addEventListener('click', () => {
+    setExerciseDetailsCollapsed(!exerciseState.detailsCollapsed);
+  });
+}
+
 if (exerciseReplayButton) {
   exerciseReplayButton.addEventListener('click', async () => {
     await replayExerciseTone();
@@ -1450,6 +1489,7 @@ resizeCanvas();
 setPitchDisplay(null);
 updateFollowToggleUi();
 populateExerciseRangeOptions();
+setExerciseDetailsCollapsed(true);
 resetExerciseUi();
 setStatus('Mic idle');
 render();

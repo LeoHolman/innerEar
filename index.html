@@ -144,59 +144,83 @@
             class="exercise-panel"
             id="exercisePanel"
             hidden
+            aria-live="polite"
           >
             <div class="exercise-card is-selected">
-              <div class="exercise-card-copy">
+              <div class="exercise-card-head">
                 <p class="panel-label">Exercise library</p>
-                <span class="exercise-badge">Preset exercise</span>
-                <p class="exercise-title">Pitch Matching</p>
-                <p class="exercise-description">
-                  Choose the comfortable range you want to practice in, then sing
-                  the prompt tone back without seeing the note name first.
-                </p>
+                <button
+                  id="exerciseDetailsToggle"
+                  class="secondary-button exercise-details-toggle"
+                  type="button"
+                  aria-expanded="false"
+                  aria-controls="exerciseDetails"
+                >
+                  Show explanation
+                </button>
               </div>
 
-              <div class="exercise-config-grid">
-                <label class="exercise-field">
-                  <span>Lowest note</span>
-                  <select id="exerciseLowNote"></select>
-                </label>
-                <label class="exercise-field">
-                  <span>Highest note</span>
-                  <select id="exerciseHighNote"></select>
-                </label>
-                <div class="exercise-actions">
-                  <button
-                    id="exerciseStartButton"
-                    class="primary-button"
-                    type="button"
-                  >
-                    Start pitch matching
-                  </button>
-                  <button
-                    id="exerciseReplayButton"
-                    class="secondary-button"
-                    type="button"
-                    disabled
-                  >
-                    Replay tone
-                  </button>
+              <div
+                class="exercise-details"
+                id="exerciseDetails"
+                hidden
+              >
+                <div class="exercise-card-copy">
+                  <span class="exercise-badge">Preset exercise</span>
+                  <p class="exercise-title">Pitch Matching</p>
+                  <p class="exercise-description">
+                    Choose the comfortable range you want to practice in, then sing
+                    the prompt tone back without seeing the note name first.
+                  </p>
                 </div>
+
+                <div class="exercise-config-grid">
+                  <label class="exercise-field">
+                    <span>Lowest note</span>
+                    <select id="exerciseLowNote"></select>
+                  </label>
+                  <label class="exercise-field">
+                    <span>Highest note</span>
+                    <select id="exerciseHighNote"></select>
+                  </label>
+                </div>
+              </div>
+
+              <div class="exercise-actions">
+                <button
+                  id="exerciseStartButton"
+                  class="primary-button"
+                  type="button"
+                >
+                  Start pitch matching
+                </button>
+                <button
+                  id="exerciseReplayButton"
+                  class="secondary-button"
+                  type="button"
+                  disabled
+                >
+                  Replay tone
+                </button>
               </div>
 
               <div class="exercise-live-card">
                 <div class="exercise-status-head">
-                  <span class="panel-label">What you are singing</span>
+                  <span class="panel-label">Pitch summary</span>
                   <span id="exerciseLiveStatus">Waiting</span>
                 </div>
                 <div class="exercise-live-grid">
                   <article class="exercise-live-stat">
-                    <span class="stat-label">Note</span>
+                    <span class="stat-label">Your pitch</span>
                     <strong id="exerciseCurrentNote">--</strong>
                   </article>
                   <article class="exercise-live-stat">
                     <span class="stat-label">Frequency</span>
                     <strong id="exerciseCurrentFrequency">--</strong>
+                  </article>
+                  <article class="exercise-live-stat">
+                    <span class="stat-label">Hidden pitch</span>
+                    <strong id="exerciseReveal">--</strong>
                   </article>
                 </div>
                 <p
@@ -224,13 +248,6 @@
                     id="exerciseProgressFill"
                   ></div>
                 </div>
-                <p
-                  class="exercise-reveal"
-                  id="exerciseReveal"
-                  aria-live="polite"
-                >
-                  Note reveal: --
-                </p>
               </div>
             </div>
           </aside>

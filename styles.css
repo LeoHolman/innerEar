@@ -181,15 +181,14 @@ body::before {
 }
 
 .roll-layout.is-exercise-open {
-  grid-template-columns: minmax(0, 1fr) 360px;
+  grid-template-columns: minmax(0, 1fr) 320px;
 }
 
 .exercise-panel {
   display: grid;
-  gap: 18px;
-  align-self: stretch;
-  min-height: min(78vh, 860px);
-  padding: 20px;
+  gap: 14px;
+  align-self: start;
+  padding: 16px;
   border-radius: var(--radius-lg);
   border: 1px solid rgba(255, 255, 255, 0.08);
   background:
@@ -219,8 +218,8 @@ body::before {
 
 .exercise-card {
   display: grid;
-  gap: 18px;
-  padding: 20px;
+  gap: 14px;
+  padding: 16px;
   border-radius: var(--radius-md);
   border: 1px solid rgba(255, 255, 255, 0.09);
   background: linear-gradient(
@@ -228,6 +227,28 @@ body::before {
     rgba(13, 20, 36, 0.92),
     rgba(7, 10, 18, 0.92)
   );
+}
+
+.exercise-card-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+
+.exercise-details-toggle {
+  min-height: 40px;
+  padding: 0 14px;
+  font-size: 0.82rem;
+}
+
+.exercise-details {
+  display: grid;
+  gap: 14px;
+}
+
+.exercise-details[hidden] {
+  display: none;
 }
 
 .exercise-card-copy {
@@ -293,9 +314,12 @@ body::before {
 }
 
 .exercise-actions {
-  grid-column: 1 / -1;
   display: flex;
   flex-wrap: wrap;
+  gap: 12px;
+}
+
+.exercise-panel.is-details-collapsed .exercise-card {
   gap: 12px;
 }
 
@@ -325,12 +349,12 @@ body::before {
 
 .exercise-live-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
 }
 
 .exercise-live-stat {
-  padding: 14px;
+  padding: 12px;
   border-radius: 16px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(255, 255, 255, 0.04);
@@ -338,9 +362,13 @@ body::before {
 
 .exercise-live-stat strong {
   display: block;
-  margin-top: 8px;
-  font-size: 1.2rem;
+  margin-top: 6px;
+  font-size: 1.05rem;
   letter-spacing: -0.03em;
+}
+
+.exercise-reveal {
+  color: var(--text);
 }
 
 .exercise-guidance {
@@ -523,7 +551,7 @@ body::before {
 
 .roll-stage {
   position: relative;
-  min-height: min(78vh, 860px);
+  min-height: clamp(480px, 68vh, 860px);
   overflow: hidden;
   border-radius: 24px;
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -599,6 +627,11 @@ body::before {
     align-items: start;
   }
 
+  .exercise-card-head {
+    flex-direction: column;
+    align-items: start;
+  }
+
   .panel-note {
     text-align: left;
   }
@@ -644,7 +677,7 @@ body::before {
   }
 
   .roll-stage {
-    min-height: 72vh;
+    min-height: 68vh;
   }
 
   .exercise-config-grid {
@@ -652,7 +685,7 @@ body::before {
   }
 
   .exercise-live-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
   .exercise-actions {
@@ -663,5 +696,11 @@ body::before {
   .exercise-actions .secondary-button,
   .exercise-field select {
     width: 100%;
+  }
+}
+
+@media (max-width: 560px) {
+  .exercise-live-grid {
+    grid-template-columns: 1fr;
   }
 }
