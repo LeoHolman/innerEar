@@ -1616,6 +1616,8 @@ function updateScaleExercise(sample) {
 
     if (heldMs >= stepHoldMs) {
       const nextIndex = currentIndex + 1;
+      const clearedLabel = midiToNoteName(targetMidi);
+      showExerciseToast(`Cleared ${clearedLabel}`, 'success');
       exerciseState.scaleStepIndex = nextIndex;
       exerciseState.holdStartTime = null;
       exerciseState.lastInTuneTime = null;
