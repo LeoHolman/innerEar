@@ -128,6 +128,8 @@ const EXERCISE_MEMORY_COUNTDOWN_SECONDS = 3;
 const EXERCISE_MEMORY_ATTEMPT_WINDOW_MS = 3000;
 const EXERCISE_SCALE_STEP_HOLD_MS = 1000;
 const EXERCISE_SCALE_TOTAL_TIMEOUT_MS = 36000;
+const FOLLOW_SCALE_PROMPT_MS = 1000;
+const FOLLOW_SCALE_TOAST_PAUSE_MS = 500;
 const RANDOM_SCALE_DEGREE_SCALE_TYPE = 'major';
 
 const SCALE_PATTERNS = {
@@ -176,6 +178,13 @@ const EXERCISE_PRESETS = {
       'Hear a tonic, then sing the requested major scale degree and hold it for one second.',
     startLabel: 'Start random scale degree',
   },
+  'follow-scale': {
+    badge: 'Scale exercise',
+    title: 'Follow the Scale',
+    description:
+      'Hear each scale tone for one second, clear it with the toast cue, then sing it back before moving on.',
+    startLabel: 'Start follow the scale',
+  },
 };
 
 const exerciseState = {
@@ -218,6 +227,24 @@ function waitMs(durationMs) {
   return new Promise((resolve) => {
     window.setTimeout(resolve, Math.max(0, durationMs));
   });
+}
+
+function hideExerciseToast() {
+  if (
+    window.innerEarToast &&
+    typeof window.innerEarToast.dismiss === 'function'
+  ) {
+    window.innerEarToast.dismiss();
+  }
+}
+
+function showExerciseToast(message, tone = 'neutral') {
+  if (window.innerEarToast && typeof window.innerEarToast.show === 'function') {
+    window.innerEarToast.show(message, tone);
+    return;
+  }
+
+  setExerciseFeedback(message, tone === 'success' ? 'success' : 'neutral');
 }
 
 function median(values) {
@@ -382,6 +409,15 @@ function setExerciseLiveReadout(sample) {
     return;
   }
 
+  if (
+    exerciseState.selectedExercise === 'follow-scale' &&
+    exerciseState.phase !== 'follow-sing'
+  ) {
+    exerciseCurrentDelta.textContent =
+      'Current match guidance: hidden until the prompt ends';
+    return;
+  }
+
   let targetMidi = exerciseState.targetMidi;
   if (
     exerciseState.selectedExercise === 'match-scale' &&
@@ -533,6 +569,7 @@ function resetExerciseAttemptState() {
   exerciseState.lastInTuneTime = null;
   exerciseState.attemptStartedAt = null;
   exerciseState.lastDetectedSample = null;
+  hideExerciseToast();
 }
 
 function clearExerciseTimers() {
@@ -549,6 +586,11 @@ function clearExerciseTimers() {
   if (exerciseState.memoryCountdownHideTimerId != null) {
     window.clearTimeout(exerciseState.memoryCountdownHideTimerId);
     exerciseState.memoryCountdownHideTimerId = null;
+  }
+
+  if (exerciseState.followScaleAdvanceTimerId != null) {
+    window.clearTimeout(exerciseState.followScaleAdvanceTimerId);
+    exerciseState.followScaleAdvanceTimerId = null;
   }
 }
 
@@ -615,10 +657,12 @@ function updateExercisePresetUi() {
     EXERCISE_PRESETS['pitch-matching'];
   const isPitchMemory = exerciseState.selectedExercise === 'pitch-memory';
   const isScaleMatch = exerciseState.selectedExercise === 'match-scale';
+  const isFollowScale = exerciseState.selectedExercise === 'follow-scale';
   const isRandomScaleDegree =
     exerciseState.selectedExercise === 'random-scale-degree';
   const usesScaleSettings =
     exerciseState.selectedExercise === 'match-scale' ||
+    exerciseState.selectedExercise === 'follow-scale' ||
     exerciseState.selectedExercise === 'random-scale-degree';
 
   if (exerciseType && exerciseType.value !== exerciseState.selectedExercise) {
@@ -674,6 +718,10 @@ function updateExercisePresetUi() {
     exerciseScaleDirection.value !== exerciseState.scaleDirection
   ) {
     exerciseScaleDirection.value = exerciseState.scaleDirection;
+  }
+
+  if (exerciseScaleDirectionField && isFollowScale) {
+    exerciseScaleDirectionField.hidden = true;
   }
 
   if (exerciseRandomTonic) {
@@ -778,6 +826,23 @@ function buildScaleNotes(rootMidi, scaleType) {
     exerciseState.scaleDirection,
   );
   return offsets.map((offset) => rootMidi + offset);
+}
+
+function chooseFollowScaleRootMidi(scaleType) {
+  const offsets = getScalePattern(scaleType);
+  const highestOffset = Math.max(...offsets);
+  const minRoot = exerciseState.rangeLowMidi;
+  const maxRoot = exerciseState.rangeHighMidi - highestOffset;
+
+  if (maxRoot < minRoot) {
+    return null;
+  }
+
+  return minRoot + Math.floor(Math.random() * (maxRoot - minRoot + 1));
+}
+
+function buildFollowScaleNotes(rootMidi, scaleType) {
+  return getScalePattern(scaleType).map((offset) => rootMidi + offset);
 }
 
 function chooseRandomScaleDegreePrompt() {
@@ -1319,6 +1384,140 @@ function updateScaleExercise(sample) {
   }
 }
 
+function updateFollowScaleExercise(sample) {
+  if (
+    !exerciseState.active ||
+    exerciseState.selectedExercise !== 'follow-scale' ||
+    exerciseState.phase !== 'follow-sing' ||
+    exerciseState.scaleNotes.length === 0
+  ) {
+    return;
+  }
+
+  const now = performance.now();
+  const currentIndex = clamp(
+    exerciseState.scaleStepIndex,
+    0,
+    exerciseState.scaleNotes.length - 1,
+  );
+  const targetMidi = exerciseState.scaleNotes[currentIndex];
+
+  if (exerciseState.scaleSingStartedAt != null) {
+    exerciseState.scaleRecordedSamples.push({
+      timeMs: now - exerciseState.scaleSingStartedAt,
+      midi: sample.midi,
+      confidence: sample.confidence,
+    });
+  }
+
+  const withinTolerance =
+    sample.confidence >= EXERCISE_MIN_CONFIDENCE &&
+    Math.abs(sample.midi - targetMidi) <= EXERCISE_MATCH_TOLERANCE;
+
+  if (withinTolerance) {
+    if (exerciseState.holdStartTime == null) {
+      exerciseState.holdStartTime = now;
+    }
+
+    exerciseState.lastInTuneTime = now;
+    const heldMs = now - exerciseState.holdStartTime;
+    const progress =
+      (currentIndex + heldMs / EXERCISE_SCALE_STEP_HOLD_MS) /
+      exerciseState.scaleNotes.length;
+    setExerciseProgress(progress);
+    setExerciseAttemptText(
+      `Degree ${currentIndex + 1}/${exerciseState.scaleNotes.length}: ${midiToNoteName(targetMidi)} (${(heldMs / 1000).toFixed(2)}s)`,
+    );
+    setExerciseFeedback(
+      currentIndex === 0
+        ? 'Hold the tonic steady, then the scale will move on.'
+        : 'Hold the note steady, then the scale will move on.',
+      'neutral',
+    );
+
+    if (heldMs >= EXERCISE_SCALE_STEP_HOLD_MS) {
+      const nextIndex = currentIndex + 1;
+      exerciseState.scaleStepIndex = nextIndex;
+      exerciseState.holdStartTime = null;
+      exerciseState.lastInTuneTime = null;
+      exerciseState.phase = 'follow-transition';
+
+      const clearedLabel = midiToNoteName(targetMidi);
+      showExerciseToast(`Cleared ${clearedLabel}`, 'success');
+
+      if (exerciseState.followScaleAdvanceTimerId != null) {
+        window.clearTimeout(exerciseState.followScaleAdvanceTimerId);
+      }
+
+      exerciseState.followScaleAdvanceTimerId = window.setTimeout(() => {
+        exerciseState.followScaleAdvanceTimerId = null;
+
+        if (
+          !exerciseState.active ||
+          exerciseState.selectedExercise !== 'follow-scale'
+        ) {
+          return;
+        }
+
+        if (nextIndex >= exerciseState.scaleNotes.length) {
+          finalizeFollowScaleExerciseAttempt(true);
+          return;
+        }
+
+        void startFollowScaleStep(nextIndex);
+      }, FOLLOW_SCALE_TOAST_PAUSE_MS);
+
+      if (nextIndex >= exerciseState.scaleNotes.length) {
+        return;
+      }
+
+      return;
+    }
+
+    return;
+  }
+
+  if (
+    exerciseState.holdStartTime != null &&
+    exerciseState.lastInTuneTime != null &&
+    now - exerciseState.lastInTuneTime <= EXERCISE_HOLD_GRACE_MS
+  ) {
+    const heldMs = now - exerciseState.holdStartTime;
+    const progress =
+      (currentIndex + heldMs / EXERCISE_SCALE_STEP_HOLD_MS) /
+      exerciseState.scaleNotes.length;
+    setExerciseProgress(progress);
+    setExerciseAttemptText(
+      `Degree ${currentIndex + 1}/${exerciseState.scaleNotes.length}: ${midiToNoteName(targetMidi)} (${(heldMs / 1000).toFixed(2)}s)`,
+    );
+    setExerciseFeedback(
+      'Close. Keep this degree centered and steady.',
+      'neutral',
+    );
+    return;
+  }
+
+  exerciseState.holdStartTime = null;
+  exerciseState.lastInTuneTime = null;
+  setExerciseAttemptText(
+    `Degree ${currentIndex + 1}/${exerciseState.scaleNotes.length}: ${midiToNoteName(targetMidi)}`,
+  );
+  setExerciseFeedback(
+    `Find the target degree. ${describeDirectionFromTarget(sample.midi - targetMidi)}.`,
+    'neutral',
+  );
+
+  if (
+    exerciseState.scaleSingStartedAt != null &&
+    now - exerciseState.scaleSingStartedAt >= EXERCISE_SCALE_TOTAL_TIMEOUT_MS
+  ) {
+    finalizeFollowScaleExerciseAttempt(
+      false,
+      'Time ran out before the scale was completed.',
+    );
+  }
+}
+
 async function startScaleExercise() {
   syncExerciseRangeFromInputs();
   syncExerciseScaleTypeFromInput();
@@ -1416,6 +1615,181 @@ async function startScaleExercise() {
     'neutral',
   );
   setStatus('Scale exercise listening', true);
+}
+
+function finalizeFollowScaleExerciseAttempt(success, failureReason = '') {
+  const scaleNotes = [...exerciseState.scaleNotes];
+  const scaleTypeLabel = SCALE_LABELS[exerciseState.scaleType] || 'Scale';
+  const rootMidi = exerciseState.targetMidi;
+  const rootName = rootMidi != null ? midiToNoteName(rootMidi) : '--';
+  const singStartedAt = exerciseState.scaleSingStartedAt;
+  const scaleRecordedSamples = [...exerciseState.scaleRecordedSamples];
+  const now = performance.now();
+
+  const recordedDurationMs =
+    singStartedAt == null
+      ? scaleNotes.length * EXERCISE_SCALE_STEP_HOLD_MS
+      : Math.max(1, now - singStartedAt);
+
+  const targetDurationMs = scaleNotes.length * EXERCISE_SCALE_STEP_HOLD_MS;
+  const reviewDurationMs = Math.max(recordedDurationMs, targetDurationMs);
+
+  exerciseState.scaleReview = {
+    expectedSegments: scaleNotes.map((midi, index) => ({
+      midi,
+      startMs: index * EXERCISE_SCALE_STEP_HOLD_MS,
+      endMs: (index + 1) * EXERCISE_SCALE_STEP_HOLD_MS,
+    })),
+    actualSamples: scaleRecordedSamples,
+    durationMs: reviewDurationMs,
+    label: `${rootName} ${scaleTypeLabel} follow-through`,
+  };
+
+  clearExerciseTimers();
+  resetExerciseAttemptState();
+  setExerciseCountdownText('--');
+  setExerciseProgress(success ? 1 : 0);
+  setExercisePhaseText('Review');
+  setExerciseAttemptText(success ? 'Scale followed' : 'Sequence stopped');
+
+  if (success) {
+    setExerciseFeedback(
+      `Success. You followed ${rootName} ${scaleTypeLabel.toLowerCase()} from tonic to octave.`,
+      'success',
+    );
+    setStatus('Exercise success', true);
+  } else {
+    const reasonText = failureReason
+      ? ` ${failureReason}`
+      : ' Try again and hold each scale degree for one full second.';
+    setExerciseFeedback(
+      `Scale sequence not completed.${reasonText}`,
+      'warning',
+    );
+    setStatus('Exercise try again', true);
+  }
+
+  setExerciseRevealText(`${rootName} ${scaleTypeLabel} ascending`);
+}
+
+async function startFollowScaleStep(stepIndex) {
+  if (
+    !exerciseState.active ||
+    exerciseState.selectedExercise !== 'follow-scale' ||
+    exerciseState.scaleNotes.length === 0
+  ) {
+    return;
+  }
+
+  const currentIndex = clamp(stepIndex, 0, exerciseState.scaleNotes.length - 1);
+  const targetMidi = exerciseState.scaleNotes[currentIndex];
+
+  exerciseState.scaleStepIndex = currentIndex;
+  exerciseState.targetMidi = targetMidi;
+  exerciseState.phase = 'follow-prompt';
+  exerciseState.holdStartTime = null;
+  exerciseState.lastInTuneTime = null;
+
+  setExercisePhaseText('Prompt');
+  setExerciseAttemptText(
+    `Listen to degree ${currentIndex + 1}/${exerciseState.scaleNotes.length}`,
+  );
+  setExerciseFeedback(
+    currentIndex === 0
+      ? `Hear the tonic ${midiToNoteName(targetMidi)} for one second, then sing it back.`
+      : `Hear degree ${currentIndex + 1} (${midiToNoteName(targetMidi)}) for one second, then sing it back.`,
+    'neutral',
+  );
+  setExerciseRevealText(
+    `${midiToNoteName(exerciseState.scaleNotes[0])} ${SCALE_LABELS[exerciseState.scaleType] || 'Scale'}`,
+  );
+  setExerciseProgress(currentIndex / exerciseState.scaleNotes.length);
+  setStatus('Follow the scale prompt playing', true);
+
+  await playReferenceToneForDuration(targetMidi, FOLLOW_SCALE_PROMPT_MS);
+  await waitMs(FOLLOW_SCALE_PROMPT_MS);
+
+  if (
+    !exerciseState.active ||
+    exerciseState.selectedExercise !== 'follow-scale' ||
+    exerciseState.scaleStepIndex !== currentIndex
+  ) {
+    return;
+  }
+
+  exerciseState.phase = 'follow-sing';
+  if (exerciseState.scaleSingStartedAt == null) {
+    exerciseState.scaleSingStartedAt = performance.now();
+  }
+  exerciseState.attemptStartedAt = exerciseState.scaleSingStartedAt;
+  setExercisePhaseText('Sing');
+  setExerciseAttemptText(
+    `Degree ${currentIndex + 1}/${exerciseState.scaleNotes.length}: ${midiToNoteName(targetMidi)}`,
+  );
+  setExerciseFeedback(
+    'Sing the prompt pitch and hold it for 1 second before the scale moves on.',
+    'neutral',
+  );
+  setStatus('Follow the scale listening', true);
+}
+
+async function startFollowScaleExercise() {
+  syncExerciseRangeFromInputs();
+  syncExerciseScaleTypeFromInput();
+
+  if (!running) {
+    await startAudio();
+  }
+
+  if (!running) {
+    return;
+  }
+
+  clearExerciseTimers();
+  resetExerciseAttemptState();
+  clearExerciseReview();
+
+  const rootMidi = chooseFollowScaleRootMidi(exerciseState.scaleType);
+  const scaleTypeLabel = SCALE_LABELS[exerciseState.scaleType] || 'Scale';
+  if (rootMidi == null) {
+    setExercisePhaseText('Idle');
+    setExerciseAttemptText('Range too narrow');
+    setExerciseFeedback(
+      `This range cannot fit an ascending ${scaleTypeLabel.toLowerCase()} scale. Adjust the range and try again.`,
+      'warning',
+    );
+    setExerciseRevealText('--');
+    setExerciseProgress(0);
+    return;
+  }
+
+  const scaleNotes = buildFollowScaleNotes(rootMidi, exerciseState.scaleType);
+
+  exerciseState.targetMidi = rootMidi;
+  exerciseState.active = true;
+  exerciseState.phase = 'follow-prompt';
+  exerciseState.scaleNotes = scaleNotes;
+  exerciseState.scaleStepIndex = 0;
+  exerciseState.scaleSingStartedAt = null;
+  exerciseState.scaleRecordedSamples = [];
+  exerciseState.lastDetectedSample = null;
+  exerciseState.holdStartTime = null;
+  exerciseState.lastInTuneTime = null;
+  exerciseState.attemptStartedAt = null;
+
+  setExerciseRevealText(`${midiToNoteName(rootMidi)} ${scaleTypeLabel}`);
+  setExerciseCountdownText('--');
+  setExerciseProgress(0);
+  setExercisePhaseText('Prompt');
+  setExerciseAttemptText('Listen to the tonic');
+  setExerciseFeedback(
+    `Hear the tonic ${midiToNoteName(rootMidi)} for half a second, then sing it back before moving through the rest of the ${scaleTypeLabel.toLowerCase()} scale.`,
+    'neutral',
+  );
+  setExerciseLiveReadout(null);
+
+  setStatus('Follow the scale prompt playing', true);
+  await startFollowScaleStep(0);
 }
 
 function finalizeRandomScaleDegreeAttempt(success) {
@@ -2663,6 +3037,8 @@ function updateFromAudio() {
     if (exerciseState.active) {
       if (exerciseState.selectedExercise === 'pitch-memory') {
         updatePitchMemoryExercise(sample);
+      } else if (exerciseState.selectedExercise === 'follow-scale') {
+        updateFollowScaleExercise(sample);
       } else if (exerciseState.selectedExercise === 'match-scale') {
         updateScaleExercise(sample);
       } else if (exerciseState.selectedExercise === 'random-scale-degree') {
@@ -2681,6 +3057,8 @@ function updateFromAudio() {
       (exerciseState.selectedExercise === 'pitch-matching' ||
         (exerciseState.selectedExercise === 'random-scale-degree' &&
           exerciseState.phase === 'random-degree-sing') ||
+        (exerciseState.selectedExercise === 'follow-scale' &&
+          exerciseState.phase === 'follow-sing') ||
         (exerciseState.selectedExercise === 'match-scale' &&
           exerciseState.phase === 'scale-sing') ||
         (exerciseState.selectedExercise === 'pitch-memory' &&
@@ -2726,6 +3104,19 @@ function updateFromAudio() {
       now >= exerciseState.memoryEvaluationEndTime
     ) {
       finalizePitchMemoryAttempt(false);
+    }
+
+    if (
+      exerciseState.active &&
+      exerciseState.selectedExercise === 'follow-scale' &&
+      exerciseState.phase === 'follow-sing' &&
+      exerciseState.scaleSingStartedAt != null &&
+      now - exerciseState.scaleSingStartedAt >= EXERCISE_SCALE_TOTAL_TIMEOUT_MS
+    ) {
+      finalizeFollowScaleExerciseAttempt(
+        false,
+        'Time ran out before the scale was completed.',
+      );
     }
 
     if (
@@ -2917,6 +3308,11 @@ if (exerciseStartButton) {
 
     if (exerciseState.selectedExercise === 'random-scale-degree') {
       await startRandomScaleDegreeExercise();
+      return;
+    }
+
+    if (exerciseState.selectedExercise === 'follow-scale') {
+      await startFollowScaleExercise();
       return;
     }
 

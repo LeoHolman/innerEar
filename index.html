@@ -35,10 +35,16 @@
     />
     <script
       type="module"
-      src="app.js"
+      src="/main.jsx"
     ></script>
   </head>
   <body>
+    <div
+      id="exerciseToastHost"
+      class="exercise-toast-host"
+      aria-live="polite"
+      aria-atomic="true"
+    ></div>
     <main class="app-shell">
       <section class="hero-card">
         <div class="hero-copy">
@@ -172,6 +178,7 @@
                       <option value="pitch-matching">Pitch Matching</option>
                       <option value="pitch-memory">Pitch Memory</option>
                       <option value="match-scale">Match the Scale</option>
+                      <option value="follow-scale">Follow the Scale</option>
                       <option value="random-scale-degree">Random Scale Degree</option>
                     </select>
                   </label>

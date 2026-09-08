@@ -4,9 +4,20 @@ A polished browser app that records microphone input in real time and shows the 
 
 ## How to run
 
-This project is a static site, so you only need a local web server. Do not open `index.html` directly from disk if you want microphone access, because the browser will usually block `getUserMedia` on `file://` URLs.
+This project now runs with Vite (React tooling), so use the dev server below. Do not open `index.html` directly from disk if you want microphone access, because the browser will usually block `getUserMedia` on `file://` URLs.
 
-### Option 1: Python
+### Option 1: npm + Vite (recommended)
+
+From the project folder:
+
+```bash
+npm install
+npm run dev
+```
+
+Then open the URL printed by Vite (typically `http://localhost:5173`).
+
+### Option 2: Python
 
 From the project folder:
 
@@ -20,7 +31,7 @@ Then open:
 http://localhost:4173
 ```
 
-### Option 2: Any static server
+### Option 3: Any static server
 
 You can also use any other local static file server, as long as it serves the files over `http://localhost` or `https://`.
 
@@ -28,6 +39,7 @@ You can also use any other local static file server, as long as it serves the fi
 
 - A microphone start/stop button
 - An Exercises button with a Pitch Matching preset
+- Exercise presets for Pitch Matching, Pitch Memory, Match the Scale, Follow the Scale, and Random Scale Degree
 - Live note, frequency, and cents readouts
 - A vertical piano-roll visualization with note guide lines
 
@@ -65,6 +77,18 @@ Open Exercises, switch the Exercise selector to Match the Scale, then:
 - Sing through each degree in the selected direction, holding each degree in tune for one second.
 - The selected tonic is chosen so the full target scale stays inside your selected low/high range.
 - When the attempt ends, the roll overlays target note outlines against your sung contour so you can see where each degree drifted.
+
+## Follow the Scale
+
+Open Exercises, switch the Exercise selector to Follow the Scale, then:
+
+- Set your lowest and highest comfortable notes.
+- Choose the scale type (Major, Minor, or Pentatonic).
+- Start the exercise to hear each scale tone for one second.
+- Sing each note back for one second to move to the next scale degree.
+- A small toast appears each time you clear a note, then the app waits half a second before the next tone.
+- The app continues one note at a time until it reaches the octave.
+- When the attempt ends, the roll overlays the target scale against your sung contour.
 
 ## Random Scale Degree
 
