@@ -1443,6 +1443,10 @@ function finalizePitchMemoryAttempt(success) {
   setExerciseRevealText(revealedNote);
   setExerciseCountdownText('--');
   setStatus(success ? 'Exercise success' : 'Exercise try again', true);
+  showExerciseToast(
+    success ? 'Pitch Memory cleared' : 'Pitch Memory failed',
+    success ? 'success' : 'warning',
+  );
 }
 
 function beginPitchMemorySingWindow() {
@@ -1621,12 +1625,14 @@ function finalizeScaleExerciseAttempt(success, failureReason = '') {
       'success',
     );
     setStatus('Exercise success', true);
+    showExerciseToast('Sing the Scale cleared', 'success');
   } else {
     const reasonText = failureReason
       ? ` ${failureReason}`
       : ' Try again and hold each scale degree for one full second.';
     setExerciseFeedback(`Scale not completed.${reasonText}`, 'warning');
     setStatus('Exercise try again', true);
+    showExerciseToast('Sing the Scale failed', 'warning');
   }
 
   setExerciseRevealText(`${rootName} ${scaleTypeLabel} ${directionLabel}`);
@@ -2027,6 +2033,7 @@ function finalizeFollowScaleExerciseAttempt(success, failureReason = '') {
       'success',
     );
     setStatus('Exercise success', true);
+    showExerciseToast('Follow the Scale cleared', 'success');
   } else {
     const reasonText = failureReason
       ? ` ${failureReason}`
@@ -2036,6 +2043,7 @@ function finalizeFollowScaleExerciseAttempt(success, failureReason = '') {
       'warning',
     );
     setStatus('Exercise try again', true);
+    showExerciseToast('Follow the Scale failed', 'warning');
   }
 
   setExerciseRevealText(`${rootName} ${scaleTypeLabel} ascending`);
@@ -2189,12 +2197,14 @@ function finalizeRandomScaleDegreeAttempt(success) {
       'success',
     );
     setStatus('Exercise success', true);
+    showExerciseToast('Random Scale Degree cleared', 'success');
   } else {
     setExerciseFeedback(
       `Incorrect. Degree ${degreeNumber} from ${tonicNote} is ${targetNote}.${attemptSummary}`,
       'warning',
     );
     setStatus('Exercise try again', true);
+    showExerciseToast('Random Scale Degree failed', 'warning');
   }
 
   setExerciseRevealText(`Degree ${degreeNumber} -> ${targetNote}`);
@@ -2394,6 +2404,10 @@ function finalizePitchMatchingAttempt(success) {
   setExerciseRevealText(revealedNote);
   setExerciseCountdownText('--');
   setStatus(success ? 'Exercise success' : 'Exercise try again', true);
+  showExerciseToast(
+    success ? 'Pitch Matching cleared' : 'Pitch Matching failed',
+    success ? 'success' : 'warning',
+  );
 }
 
 function updatePitchMatchingExercise(sample) {
