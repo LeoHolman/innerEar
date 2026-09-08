@@ -63,6 +63,7 @@ const exerciseScaleDirectionField = document.getElementById(
   'exerciseScaleDirectionField',
 );
 const exerciseGrading = document.getElementById('exerciseGrading');
+const exerciseHints = document.getElementById('exerciseHints');
 const exerciseRandomTonicField = document.getElementById(
   'exerciseRandomTonicField',
 );
@@ -157,6 +158,12 @@ const GRADING_MODES = {
   lax: 'lax',
 };
 
+const HINT_MODES = {
+  all: 'all',
+  gentle: 'gentle',
+  none: 'none',
+};
+
 const EXERCISE_PRESETS = {
   'pitch-matching': {
     badge: 'Preset exercise',
@@ -205,6 +212,7 @@ const exerciseState = {
   rangeHighMidi: 60,
   memoryDelaySeconds: EXERCISE_MEMORY_DEFAULT_DELAY_SECONDS,
   gradingMode: GRADING_MODES.strict,
+  hintMode: HINT_MODES.all,
   scaleType: 'major',
   scaleDirection: SCALE_DIRECTIONS.ascending,
   scaleNotes: [],
@@ -330,6 +338,7 @@ function savePersistedSettings() {
       rangeHighMidi: exerciseState.rangeHighMidi,
       memoryDelaySeconds: exerciseState.memoryDelaySeconds,
       gradingMode: exerciseState.gradingMode,
+      hintMode: exerciseState.hintMode,
       scaleType: exerciseState.scaleType,
       scaleDirection: exerciseState.scaleDirection,
       randomDegreeUseRandomTonic: exerciseState.randomDegreeUseRandomTonic,
@@ -403,6 +412,14 @@ function loadPersistedSettings() {
     }
 
     if (
+      settings.hintMode === HINT_MODES.all ||
+      settings.hintMode === HINT_MODES.gentle ||
+      settings.hintMode === HINT_MODES.none
+    ) {
+      exerciseState.hintMode = settings.hintMode;
+    }
+
+    if (
       typeof settings.scaleType === 'string' &&
       SCALE_PATTERNS[settings.scaleType]
     ) {
@@ -472,6 +489,10 @@ function applyExerciseStateToInputs() {
     exerciseGrading.value = exerciseState.gradingMode;
   }
 
+  if (exerciseHints) {
+    exerciseHints.value = exerciseState.hintMode;
+  }
+
   if (exerciseScaleType) {
     exerciseScaleType.value = exerciseState.scaleType;
   }
@@ -538,15 +559,36 @@ function setExerciseDetailsCollapsed(isCollapsed) {
 }
 
 function describeDirectionFromTarget(deltaSemitones) {
+  if (exerciseState.hintMode === HINT_MODES.none) {
+    return '';
+  }
+
   if (Math.abs(deltaSemitones) <= getMatchToleranceSemitones()) {
     return 'On target';
   }
 
   if (deltaSemitones < 0) {
+    if (exerciseState.hintMode === HINT_MODES.gentle) {
+      return 'Too low';
+    }
+
     return `Too low by ${Math.abs(deltaSemitones).toFixed(2)} semitones`;
   }
 
+  if (exerciseState.hintMode === HINT_MODES.gentle) {
+    return 'Too high';
+  }
+
   return `Too high by ${deltaSemitones.toFixed(2)} semitones`;
+}
+
+function withDirectionalHint(baseText, deltaSemitones) {
+  const hint = describeDirectionFromTarget(deltaSemitones);
+  if (!hint) {
+    return baseText;
+  }
+
+  return `${baseText} ${hint}.`;
 }
 
 function isLaxGrading() {
@@ -650,6 +692,11 @@ function setExerciseLiveReadout(sample) {
   }
 
   const deltaSemitones = sample.midi - targetMidi;
+  if (exerciseState.hintMode === HINT_MODES.none) {
+    exerciseCurrentDelta.textContent = 'Current match guidance: hints off';
+    return;
+  }
+
   exerciseCurrentDelta.textContent = `Current match guidance: ${describeDirectionFromTarget(deltaSemitones)}`;
 }
 
@@ -855,6 +902,23 @@ function syncExerciseGradingFromInput() {
   savePersistedSettings();
 }
 
+function syncExerciseHintsFromInput() {
+  if (!exerciseHints) {
+    return;
+  }
+
+  const nextMode =
+    exerciseHints.value === HINT_MODES.gentle
+      ? HINT_MODES.gentle
+      : exerciseHints.value === HINT_MODES.none
+        ? HINT_MODES.none
+        : HINT_MODES.all;
+
+  exerciseState.hintMode = nextMode;
+  exerciseHints.value = nextMode;
+  savePersistedSettings();
+}
+
 function syncExerciseScaleTypeFromInput() {
   if (!exerciseScaleType) {
     return;
@@ -967,6 +1031,10 @@ function updateExercisePresetUi() {
 
   if (exerciseGrading && exerciseGrading.value !== exerciseState.gradingMode) {
     exerciseGrading.value = exerciseState.gradingMode;
+  }
+
+  if (exerciseHints && exerciseHints.value !== exerciseState.hintMode) {
+    exerciseHints.value = exerciseState.hintMode;
   }
 
   if (exerciseRandomTonic) {
@@ -1665,7 +1733,7 @@ function updateScaleExercise(sample) {
     `Degree ${currentIndex + 1}/${exerciseState.scaleNotes.length}: ${midiToNoteName(targetMidi)}`,
   );
   setExerciseFeedback(
-    `Find the target degree. ${describeDirectionFromTarget(sample.midi - targetMidi)}.`,
+    withDirectionalHint('Find the target degree.', sample.midi - targetMidi),
     'neutral',
   );
 
@@ -1799,7 +1867,7 @@ function updateFollowScaleExercise(sample) {
     `Degree ${currentIndex + 1}/${exerciseState.scaleNotes.length}: ${midiToNoteName(targetMidi)}`,
   );
   setExerciseFeedback(
-    `Find the target degree. ${describeDirectionFromTarget(sample.midi - targetMidi)}.`,
+    withDirectionalHint('Find the target degree.', sample.midi - targetMidi),
     'neutral',
   );
 
@@ -2202,7 +2270,10 @@ function updateRandomScaleDegreeExercise(sample) {
   setExerciseProgress(0);
   setExerciseAttemptText('Searching for the target degree');
   setExerciseFeedback(
-    `Try to land the requested degree. ${describeDirectionFromTarget(sample.midi - exerciseState.targetMidi)}.`,
+    withDirectionalHint(
+      'Try to land the requested degree.',
+      sample.midi - exerciseState.targetMidi,
+    ),
     'neutral',
   );
 
@@ -2393,7 +2464,10 @@ function updatePitchMatchingExercise(sample) {
   setExerciseProgress(0);
   setExerciseAttemptText('Searching for the target');
   setExerciseFeedback(
-    `Try to center on the prompt pitch and sustain it. ${describeDirectionFromTarget(deltaSemitones)}.`,
+    withDirectionalHint(
+      'Try to center on the prompt pitch and sustain it.',
+      deltaSemitones,
+    ),
     'neutral',
   );
 
@@ -2464,7 +2538,10 @@ function updatePitchMemoryExercise(sample) {
     setExerciseProgress(0);
     setExerciseAttemptText('Sing now');
     setExerciseFeedback(
-      `Center on the remembered pitch. ${describeDirectionFromTarget(sample.midi - exerciseState.targetMidi)}.`,
+      withDirectionalHint(
+        'Center on the remembered pitch.',
+        sample.midi - exerciseState.targetMidi,
+      ),
       'neutral',
     );
   }
@@ -3593,6 +3670,10 @@ if (exerciseGrading) {
   exerciseGrading.addEventListener('change', syncExerciseGradingFromInput);
 }
 
+if (exerciseHints) {
+  exerciseHints.addEventListener('change', syncExerciseHintsFromInput);
+}
+
 if (exerciseRandomTonic) {
   exerciseRandomTonic.addEventListener(
     'change',
@@ -3675,6 +3756,7 @@ applyExerciseStateToInputs();
 setReferenceVolumeLabel();
 syncExerciseMemoryDelayFromInput();
 syncExerciseGradingFromInput();
+syncExerciseHintsFromInput();
 syncExerciseScaleTypeFromInput();
 syncExerciseScaleDirectionFromInput();
 syncRandomDegreeUseRandomTonicFromInput();
