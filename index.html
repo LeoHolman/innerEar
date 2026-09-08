@@ -179,6 +179,7 @@
                       <option value="pitch-memory">Pitch Memory</option>
                       <option value="match-scale">Sing the Scale</option>
                       <option value="follow-scale">Follow the Scale</option>
+                      <option value="random-melody">Random Melody</option>
                       <option value="random-scale-degree">Random Scale Degree</option>
                     </select>
                   </label>
@@ -287,6 +288,60 @@
                   >
                     <span>Fixed tonic</span>
                     <select id="exerciseFixedTonic"></select>
+                  </label>
+                  <label
+                    class="exercise-field exercise-field--wide"
+                    id="exerciseMelodyStartTonicField"
+                    hidden
+                  >
+                    <span>Always start on tonic</span>
+                    <input
+                      id="exerciseMelodyStartTonic"
+                      type="checkbox"
+                      checked
+                    />
+                  </label>
+                  <label
+                    class="exercise-field"
+                    id="exerciseMelodyNoteCountField"
+                    hidden
+                  >
+                    <span>Number of notes</span>
+                    <input
+                      id="exerciseMelodyNoteCount"
+                      type="number"
+                      min="2"
+                      max="16"
+                      value="6"
+                      step="1"
+                    />
+                  </label>
+                  <label
+                    class="exercise-field exercise-field--wide"
+                    id="exerciseMelodyDelayEnabledField"
+                    hidden
+                  >
+                    <span>Delay</span>
+                    <input
+                      id="exerciseMelodyDelayEnabled"
+                      type="checkbox"
+                      checked
+                    />
+                  </label>
+                  <label
+                    class="exercise-field"
+                    id="exerciseMelodyDelaySecondsField"
+                    hidden
+                  >
+                    <span>Delay (seconds)</span>
+                    <input
+                      id="exerciseMelodyDelaySeconds"
+                      type="number"
+                      min="0"
+                      max="30"
+                      value="3"
+                      step="1"
+                    />
                   </label>
                 </div>
               </div>

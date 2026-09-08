@@ -72,6 +72,30 @@ const exerciseFixedTonicField = document.getElementById(
   'exerciseFixedTonicField',
 );
 const exerciseFixedTonic = document.getElementById('exerciseFixedTonic');
+const exerciseMelodyStartTonicField = document.getElementById(
+  'exerciseMelodyStartTonicField',
+);
+const exerciseMelodyStartTonic = document.getElementById(
+  'exerciseMelodyStartTonic',
+);
+const exerciseMelodyNoteCountField = document.getElementById(
+  'exerciseMelodyNoteCountField',
+);
+const exerciseMelodyNoteCount = document.getElementById(
+  'exerciseMelodyNoteCount',
+);
+const exerciseMelodyDelayEnabledField = document.getElementById(
+  'exerciseMelodyDelayEnabledField',
+);
+const exerciseMelodyDelayEnabled = document.getElementById(
+  'exerciseMelodyDelayEnabled',
+);
+const exerciseMelodyDelaySecondsField = document.getElementById(
+  'exerciseMelodyDelaySecondsField',
+);
+const exerciseMelodyDelaySeconds = document.getElementById(
+  'exerciseMelodyDelaySeconds',
+);
 const exerciseStartButton = document.getElementById('exerciseStartButton');
 const exerciseDetailsToggle = document.getElementById('exerciseDetailsToggle');
 const exerciseFeedback = document.getElementById('exerciseFeedback');
@@ -133,6 +157,14 @@ const EXERCISE_SCALE_TOTAL_TIMEOUT_MS = 36000;
 const FOLLOW_SCALE_PROMPT_MS = 1000;
 const FOLLOW_SCALE_TOAST_PAUSE_MS = 500;
 const RANDOM_SCALE_DEGREE_SCALE_TYPE = 'major';
+const RANDOM_MELODY_NOTE_MIN_COUNT = 2;
+const RANDOM_MELODY_NOTE_MAX_COUNT = 16;
+const RANDOM_MELODY_DEFAULT_NOTE_COUNT = 6;
+const RANDOM_MELODY_PROMPT_NOTE_MS = 1000;
+const RANDOM_MELODY_PROMPT_GAP_MS = 220;
+const RANDOM_MELODY_DELAY_MIN_SECONDS = 0;
+const RANDOM_MELODY_DELAY_MAX_SECONDS = 30;
+const RANDOM_MELODY_DEFAULT_DELAY_SECONDS = 3;
 const EXERCISE_LAX_TOLERANCE_MULTIPLIER = 1.5;
 const EXERCISE_LAX_HOLD_MULTIPLIER = 0.75;
 
@@ -200,6 +232,13 @@ const EXERCISE_PRESETS = {
       'Hear each scale tone for one second, clear it with the toast cue, then sing it back before moving on.',
     startLabel: 'Start follow the scale',
   },
+  'random-melody': {
+    badge: 'Melody exercise',
+    title: 'Random Melody',
+    description:
+      'Hear a random melody in the selected scale, then sing the same note sequence back in order.',
+    startLabel: 'Start random melody',
+  },
 };
 
 const exerciseState = {
@@ -224,6 +263,10 @@ const exerciseState = {
   randomDegreeNumber: null,
   randomDegreeUseRandomTonic: true,
   randomDegreeFixedTonicMidi: 60,
+  randomMelodyAlwaysStartTonic: true,
+  randomMelodyNoteCount: RANDOM_MELODY_DEFAULT_NOTE_COUNT,
+  randomMelodyUseDelay: true,
+  randomMelodyDelaySeconds: RANDOM_MELODY_DEFAULT_DELAY_SECONDS,
   followScaleAdvanceTimerId: null,
   memoryTimerId: null,
   memoryCountdownIntervalId: null,
@@ -343,6 +386,10 @@ function savePersistedSettings() {
       scaleDirection: exerciseState.scaleDirection,
       randomDegreeUseRandomTonic: exerciseState.randomDegreeUseRandomTonic,
       randomDegreeFixedTonicMidi: exerciseState.randomDegreeFixedTonicMidi,
+      randomMelodyAlwaysStartTonic: exerciseState.randomMelodyAlwaysStartTonic,
+      randomMelodyNoteCount: exerciseState.randomMelodyNoteCount,
+      randomMelodyUseDelay: exerciseState.randomMelodyUseDelay,
+      randomMelodyDelaySeconds: exerciseState.randomMelodyDelaySeconds,
       panelOpen: exerciseState.panelOpen,
       detailsCollapsed: exerciseState.detailsCollapsed,
       followPitchEnabled,
@@ -445,6 +492,37 @@ function loadPersistedSettings() {
       );
     }
 
+    if (typeof settings.randomMelodyAlwaysStartTonic === 'boolean') {
+      exerciseState.randomMelodyAlwaysStartTonic =
+        settings.randomMelodyAlwaysStartTonic;
+    }
+
+    const randomMelodyNoteCount = Number(settings.randomMelodyNoteCount);
+    if (Number.isFinite(randomMelodyNoteCount)) {
+      exerciseState.randomMelodyNoteCount = Math.round(
+        clamp(
+          randomMelodyNoteCount,
+          RANDOM_MELODY_NOTE_MIN_COUNT,
+          RANDOM_MELODY_NOTE_MAX_COUNT,
+        ),
+      );
+    }
+
+    if (typeof settings.randomMelodyUseDelay === 'boolean') {
+      exerciseState.randomMelodyUseDelay = settings.randomMelodyUseDelay;
+    }
+
+    const randomMelodyDelaySeconds = Number(settings.randomMelodyDelaySeconds);
+    if (Number.isFinite(randomMelodyDelaySeconds)) {
+      exerciseState.randomMelodyDelaySeconds = Math.round(
+        clamp(
+          randomMelodyDelaySeconds,
+          RANDOM_MELODY_DELAY_MIN_SECONDS,
+          RANDOM_MELODY_DELAY_MAX_SECONDS,
+        ),
+      );
+    }
+
     if (typeof settings.panelOpen === 'boolean') {
       exerciseState.panelOpen = settings.panelOpen;
     }
@@ -507,6 +585,25 @@ function applyExerciseStateToInputs() {
 
   if (exerciseFixedTonic) {
     exerciseFixedTonic.value = String(exerciseState.randomDegreeFixedTonicMidi);
+  }
+
+  if (exerciseMelodyStartTonic) {
+    exerciseMelodyStartTonic.checked =
+      exerciseState.randomMelodyAlwaysStartTonic;
+  }
+
+  if (exerciseMelodyNoteCount) {
+    exerciseMelodyNoteCount.value = String(exerciseState.randomMelodyNoteCount);
+  }
+
+  if (exerciseMelodyDelayEnabled) {
+    exerciseMelodyDelayEnabled.checked = exerciseState.randomMelodyUseDelay;
+  }
+
+  if (exerciseMelodyDelaySeconds) {
+    exerciseMelodyDelaySeconds.value = String(
+      exerciseState.randomMelodyDelaySeconds,
+    );
   }
 }
 
@@ -678,9 +775,12 @@ function setExerciseLiveReadout(sample) {
 
   let targetMidi = exerciseState.targetMidi;
   if (
-    exerciseState.selectedExercise === 'match-scale' &&
+    (exerciseState.selectedExercise === 'match-scale' ||
+      (exerciseState.selectedExercise === 'random-melody' &&
+        exerciseState.phase === 'melody-sing')) &&
     exerciseState.active &&
-    exerciseState.phase === 'scale-sing' &&
+    (exerciseState.phase === 'scale-sing' ||
+      exerciseState.phase === 'melody-sing') &&
     exerciseState.scaleNotes.length > 0
   ) {
     const scaleTargetIndex = clamp(
@@ -919,6 +1019,67 @@ function syncExerciseHintsFromInput() {
   savePersistedSettings();
 }
 
+function syncRandomMelodyAlwaysStartTonicFromInput() {
+  if (!exerciseMelodyStartTonic) {
+    return;
+  }
+
+  exerciseState.randomMelodyAlwaysStartTonic = Boolean(
+    exerciseMelodyStartTonic.checked,
+  );
+  savePersistedSettings();
+}
+
+function syncRandomMelodyNoteCountFromInput() {
+  if (!exerciseMelodyNoteCount) {
+    return;
+  }
+
+  const parsed = Number(exerciseMelodyNoteCount.value);
+  const normalized = Math.round(
+    clamp(
+      Number.isFinite(parsed) ? parsed : RANDOM_MELODY_DEFAULT_NOTE_COUNT,
+      RANDOM_MELODY_NOTE_MIN_COUNT,
+      RANDOM_MELODY_NOTE_MAX_COUNT,
+    ),
+  );
+
+  exerciseState.randomMelodyNoteCount = normalized;
+  exerciseMelodyNoteCount.value = String(normalized);
+  savePersistedSettings();
+}
+
+function syncRandomMelodyUseDelayFromInput() {
+  if (!exerciseMelodyDelayEnabled) {
+    return;
+  }
+
+  exerciseState.randomMelodyUseDelay = Boolean(
+    exerciseMelodyDelayEnabled.checked,
+  );
+  updateExercisePresetUi();
+  savePersistedSettings();
+}
+
+function syncRandomMelodyDelaySecondsFromInput() {
+  if (!exerciseMelodyDelaySeconds) {
+    return;
+  }
+
+  const parsed = Number(exerciseMelodyDelaySeconds.value);
+  const normalized = Math.round(
+    clamp(
+      Number.isFinite(parsed) ? parsed : RANDOM_MELODY_DEFAULT_DELAY_SECONDS,
+      RANDOM_MELODY_DELAY_MIN_SECONDS,
+      RANDOM_MELODY_DELAY_MAX_SECONDS,
+    ),
+  );
+
+  exerciseState.randomMelodyDelaySeconds = normalized;
+  exerciseMelodyDelaySeconds.value = String(normalized);
+  savePersistedSettings();
+}
+
 function syncExerciseScaleTypeFromInput() {
   if (!exerciseScaleType) {
     return;
@@ -959,15 +1120,18 @@ function updateExercisePresetUi() {
   const isPitchMemory = exerciseState.selectedExercise === 'pitch-memory';
   const isScaleMatch = exerciseState.selectedExercise === 'match-scale';
   const isFollowScale = exerciseState.selectedExercise === 'follow-scale';
+  const isRandomMelody = exerciseState.selectedExercise === 'random-melody';
   const isRandomScaleDegree =
     exerciseState.selectedExercise === 'random-scale-degree';
   const usesScaleSettings =
     exerciseState.selectedExercise === 'match-scale' ||
     exerciseState.selectedExercise === 'follow-scale' ||
+    exerciseState.selectedExercise === 'random-melody' ||
     exerciseState.selectedExercise === 'random-scale-degree';
   const usesTonicSettings =
     exerciseState.selectedExercise === 'match-scale' ||
     exerciseState.selectedExercise === 'follow-scale' ||
+    exerciseState.selectedExercise === 'random-melody' ||
     exerciseState.selectedExercise === 'random-scale-degree';
 
   if (exerciseType && exerciseType.value !== exerciseState.selectedExercise) {
@@ -999,7 +1163,7 @@ function updateExercisePresetUi() {
   }
 
   if (exerciseScaleDirectionField) {
-    exerciseScaleDirectionField.hidden = !isScaleMatch;
+    exerciseScaleDirectionField.hidden = !isScaleMatch && !isRandomMelody;
   }
 
   if (exerciseRandomTonicField) {
@@ -1029,6 +1193,23 @@ function updateExercisePresetUi() {
     exerciseScaleDirectionField.hidden = true;
   }
 
+  if (exerciseMelodyStartTonicField) {
+    exerciseMelodyStartTonicField.hidden = !isRandomMelody;
+  }
+
+  if (exerciseMelodyNoteCountField) {
+    exerciseMelodyNoteCountField.hidden = !isRandomMelody;
+  }
+
+  if (exerciseMelodyDelayEnabledField) {
+    exerciseMelodyDelayEnabledField.hidden = !isRandomMelody;
+  }
+
+  if (exerciseMelodyDelaySecondsField) {
+    exerciseMelodyDelaySecondsField.hidden =
+      !isRandomMelody || !exerciseState.randomMelodyUseDelay;
+  }
+
   if (exerciseGrading && exerciseGrading.value !== exerciseState.gradingMode) {
     exerciseGrading.value = exerciseState.gradingMode;
   }
@@ -1045,6 +1226,29 @@ function updateExercisePresetUi() {
     const value = String(exerciseState.randomDegreeFixedTonicMidi);
     if (exerciseFixedTonic.value !== value) {
       exerciseFixedTonic.value = value;
+    }
+  }
+
+  if (exerciseMelodyStartTonic) {
+    exerciseMelodyStartTonic.checked =
+      exerciseState.randomMelodyAlwaysStartTonic;
+  }
+
+  if (exerciseMelodyNoteCount) {
+    const value = String(exerciseState.randomMelodyNoteCount);
+    if (exerciseMelodyNoteCount.value !== value) {
+      exerciseMelodyNoteCount.value = value;
+    }
+  }
+
+  if (exerciseMelodyDelayEnabled) {
+    exerciseMelodyDelayEnabled.checked = exerciseState.randomMelodyUseDelay;
+  }
+
+  if (exerciseMelodyDelaySeconds) {
+    const value = String(exerciseState.randomMelodyDelaySeconds);
+    if (exerciseMelodyDelaySeconds.value !== value) {
+      exerciseMelodyDelaySeconds.value = value;
     }
   }
 
@@ -1203,6 +1407,63 @@ function buildFollowScaleNotes(rootMidi, scaleType) {
   return getScalePattern(scaleType).map((offset) => rootMidi + offset);
 }
 
+function chooseRandomMelodyPrompt() {
+  const rootSelection = chooseScaleRootMidi();
+  if (!rootSelection || rootSelection.rootMidi == null) {
+    return {
+      error:
+        rootSelection?.error ||
+        'This range cannot fit the selected scale and direction. Adjust settings and try again.',
+    };
+  }
+
+  const rootMidi = rootSelection.rootMidi;
+  const scaleNotes = buildScaleNotes(rootMidi, exerciseState.scaleType).filter(
+    (midi) =>
+      midi >= exerciseState.rangeLowMidi && midi <= exerciseState.rangeHighMidi,
+  );
+
+  if (scaleNotes.length === 0) {
+    return {
+      error:
+        'No notes from this scale fit inside the selected range. Widen the range and try again.',
+    };
+  }
+
+  const requestedCount = Math.round(
+    clamp(
+      exerciseState.randomMelodyNoteCount,
+      RANDOM_MELODY_NOTE_MIN_COUNT,
+      RANDOM_MELODY_NOTE_MAX_COUNT,
+    ),
+  );
+
+  const notes = [];
+  for (let index = 0; index < requestedCount; index += 1) {
+    if (index === 0 && exerciseState.randomMelodyAlwaysStartTonic) {
+      notes.push(rootMidi);
+      continue;
+    }
+
+    let candidate = scaleNotes[Math.floor(Math.random() * scaleNotes.length)];
+
+    if (index > 0 && scaleNotes.length > 1) {
+      let safety = 0;
+      while (candidate === notes[index - 1] && safety < 8) {
+        candidate = scaleNotes[Math.floor(Math.random() * scaleNotes.length)];
+        safety += 1;
+      }
+    }
+
+    notes.push(candidate);
+  }
+
+  return {
+    tonicMidi: rootMidi,
+    notes,
+  };
+}
+
 function chooseRandomScaleDegreePrompt() {
   const offsets = getScalePattern(RANDOM_SCALE_DEGREE_SCALE_TYPE);
   const degreeCandidates = [];
@@ -1316,7 +1577,7 @@ async function playReferenceToneForDuration(midi, durationMs = 1200) {
     oscillators[index].connect(partialGains[index]);
     partialGains[index].connect(mixGain);
     oscillators[index].start(now);
-    oscillators[index].stop(stopAt + 0.02);
+    oscillators[index].stop(stopAt);
   }
 
   mixGain.connect(filter);
@@ -1332,6 +1593,8 @@ async function playReferenceToneForDuration(midi, durationMs = 1200) {
     mixGain.disconnect();
     filter.disconnect();
   }, durationMs + 180);
+
+  await waitMs(durationMs);
 }
 
 async function replayExerciseTone() {
@@ -2171,6 +2434,294 @@ async function startFollowScaleExercise() {
 
   setStatus('Follow the scale prompt playing', true);
   await startFollowScaleStep(0);
+}
+
+function finalizeRandomMelodyAttempt(success, failureReason = '') {
+  const melodyNotes = [...exerciseState.scaleNotes];
+  const stepHoldMs = getScaleStepHoldTargetMs();
+  const scaleTypeLabel = SCALE_LABELS[exerciseState.scaleType] || 'Scale';
+  const directionLabel = getScaleDirectionLabel(exerciseState.scaleDirection);
+  const tonicMidi = exerciseState.targetMidi;
+  const tonicName = tonicMidi != null ? midiToNoteName(tonicMidi) : '--';
+  const singStartedAt = exerciseState.scaleSingStartedAt;
+  const recordedSamples = [...exerciseState.scaleRecordedSamples];
+  const now = performance.now();
+
+  const recordedDurationMs =
+    singStartedAt == null
+      ? melodyNotes.length * stepHoldMs
+      : Math.max(1, now - singStartedAt);
+  const targetDurationMs = melodyNotes.length * stepHoldMs;
+
+  exerciseState.scaleReview = {
+    expectedSegments: melodyNotes.map((midi, index) => ({
+      midi,
+      startMs: index * stepHoldMs,
+      endMs: (index + 1) * stepHoldMs,
+    })),
+    actualSamples: recordedSamples,
+    durationMs: Math.max(recordedDurationMs, targetDurationMs),
+    label: `${tonicName} ${scaleTypeLabel} ${directionLabel} melody`,
+  };
+
+  clearExerciseTimers();
+  resetExerciseAttemptState();
+  setExerciseCountdownText('--');
+  setExerciseProgress(success ? 1 : 0);
+  setExercisePhaseText('Review');
+  setExerciseAttemptText(success ? 'Melody matched' : 'Melody attempt ended');
+
+  if (success) {
+    setExerciseFeedback(
+      `Success. You reproduced the ${melodyNotes.length}-note melody in ${tonicName} ${scaleTypeLabel} ${directionLabel.toLowerCase()}.`,
+      'success',
+    );
+    setStatus('Exercise success', true);
+    showExerciseToast('Random Melody cleared', 'success');
+  } else {
+    const reasonText = failureReason ? ` ${failureReason}` : '';
+    setExerciseFeedback(`Melody not completed.${reasonText}`, 'warning');
+    setStatus('Exercise try again', true);
+    showExerciseToast('Random Melody failed', 'warning');
+  }
+
+  setExerciseRevealText(`${tonicName} ${scaleTypeLabel} ${directionLabel}`);
+}
+
+function updateRandomMelodyExercise(sample) {
+  if (
+    !exerciseState.active ||
+    exerciseState.selectedExercise !== 'random-melody' ||
+    exerciseState.phase !== 'melody-sing' ||
+    exerciseState.scaleNotes.length === 0
+  ) {
+    return;
+  }
+
+  const now = performance.now();
+  const currentIndex = clamp(
+    exerciseState.scaleStepIndex,
+    0,
+    exerciseState.scaleNotes.length - 1,
+  );
+  const targetMidi = exerciseState.scaleNotes[currentIndex];
+  const tolerance = getMatchToleranceSemitones();
+  const stepHoldMs = getScaleStepHoldTargetMs();
+
+  if (exerciseState.scaleSingStartedAt != null) {
+    exerciseState.scaleRecordedSamples.push({
+      timeMs: now - exerciseState.scaleSingStartedAt,
+      midi: sample.midi,
+      confidence: sample.confidence,
+    });
+  }
+
+  const withinTolerance =
+    sample.confidence >= EXERCISE_MIN_CONFIDENCE &&
+    Math.abs(sample.midi - targetMidi) <= tolerance;
+
+  if (withinTolerance) {
+    if (exerciseState.holdStartTime == null) {
+      exerciseState.holdStartTime = now;
+    }
+
+    exerciseState.lastInTuneTime = now;
+    const heldMs = now - exerciseState.holdStartTime;
+    const progress =
+      (currentIndex + heldMs / stepHoldMs) / exerciseState.scaleNotes.length;
+    setExerciseProgress(progress);
+    setExerciseAttemptText(
+      `Note ${currentIndex + 1}/${exerciseState.scaleNotes.length}: ${midiToNoteName(targetMidi)} (${(heldMs / 1000).toFixed(2)}s)`,
+    );
+    setExerciseFeedback(
+      `Hold steady, then move to note ${Math.min(currentIndex + 2, exerciseState.scaleNotes.length)}.`,
+      'neutral',
+    );
+
+    if (heldMs >= stepHoldMs) {
+      const nextIndex = currentIndex + 1;
+      showExerciseToast(`Cleared ${midiToNoteName(targetMidi)}`, 'success');
+      exerciseState.scaleStepIndex = nextIndex;
+      exerciseState.holdStartTime = null;
+      exerciseState.lastInTuneTime = null;
+
+      if (nextIndex >= exerciseState.scaleNotes.length) {
+        finalizeRandomMelodyAttempt(true);
+        return;
+      }
+
+      setExerciseAttemptText(
+        `Next note ${nextIndex + 1}/${exerciseState.scaleNotes.length}: ${midiToNoteName(exerciseState.scaleNotes[nextIndex])}`,
+      );
+      setExerciseFeedback(
+        `Move to the next note and hold for ${getHoldTargetSecondsText()}.`,
+        'neutral',
+      );
+    }
+
+    return;
+  }
+
+  if (
+    exerciseState.holdStartTime != null &&
+    exerciseState.lastInTuneTime != null &&
+    now - exerciseState.lastInTuneTime <= EXERCISE_HOLD_GRACE_MS
+  ) {
+    const heldMs = now - exerciseState.holdStartTime;
+    const progress =
+      (currentIndex + heldMs / stepHoldMs) / exerciseState.scaleNotes.length;
+    setExerciseProgress(progress);
+    setExerciseAttemptText(
+      `Note ${currentIndex + 1}/${exerciseState.scaleNotes.length}: ${midiToNoteName(targetMidi)} (${(heldMs / 1000).toFixed(2)}s)`,
+    );
+    setExerciseFeedback(
+      'Close. Keep this note centered and steady.',
+      'neutral',
+    );
+    return;
+  }
+
+  exerciseState.holdStartTime = null;
+  exerciseState.lastInTuneTime = null;
+  setExerciseAttemptText(
+    `Note ${currentIndex + 1}/${exerciseState.scaleNotes.length}: ${midiToNoteName(targetMidi)}`,
+  );
+  setExerciseFeedback(
+    withDirectionalHint(
+      'Find the current melody note.',
+      sample.midi - targetMidi,
+    ),
+    'neutral',
+  );
+
+  if (
+    exerciseState.scaleSingStartedAt != null &&
+    now - exerciseState.scaleSingStartedAt >= EXERCISE_SCALE_TOTAL_TIMEOUT_MS
+  ) {
+    finalizeRandomMelodyAttempt(
+      false,
+      'Time ran out before all melody notes were completed.',
+    );
+  }
+}
+
+async function startRandomMelodyExercise() {
+  syncExerciseRangeFromInputs();
+  syncExerciseScaleTypeFromInput();
+  syncExerciseScaleDirectionFromInput();
+  syncRandomDegreeUseRandomTonicFromInput();
+  syncRandomDegreeFixedTonicFromInput();
+  syncRandomMelodyAlwaysStartTonicFromInput();
+  syncRandomMelodyNoteCountFromInput();
+  syncRandomMelodyUseDelayFromInput();
+  syncRandomMelodyDelaySecondsFromInput();
+
+  if (!running) {
+    await startAudio();
+  }
+
+  if (!running) {
+    return;
+  }
+
+  clearExerciseTimers();
+  resetExerciseAttemptState();
+  clearExerciseReview();
+
+  const prompt = chooseRandomMelodyPrompt();
+  if (!prompt || prompt.error || !prompt.notes || prompt.notes.length === 0) {
+    setExercisePhaseText('Idle');
+    setExerciseAttemptText('Range too narrow');
+    setExerciseFeedback(
+      prompt?.error ||
+        'No melody could be generated for these settings. Adjust range or tonic settings and try again.',
+      'warning',
+    );
+    setExerciseRevealText('--');
+    setExerciseProgress(0);
+    return;
+  }
+
+  const scaleTypeLabel = SCALE_LABELS[exerciseState.scaleType] || 'Scale';
+  const directionLabel = getScaleDirectionLabel(exerciseState.scaleDirection);
+  const tonicName = midiToNoteName(prompt.tonicMidi);
+
+  exerciseState.active = true;
+  exerciseState.phase = 'melody-prompt';
+  exerciseState.targetMidi = prompt.tonicMidi;
+  exerciseState.scaleNotes = prompt.notes;
+  exerciseState.scaleStepIndex = 0;
+  exerciseState.scaleSingStartedAt = null;
+  exerciseState.scaleRecordedSamples = [];
+  exerciseState.lastDetectedSample = null;
+  exerciseState.holdStartTime = null;
+  exerciseState.lastInTuneTime = null;
+  exerciseState.attemptStartedAt = null;
+
+  setExerciseRevealText('Hidden melody');
+  setExerciseCountdownText('--');
+  setExerciseProgress(0);
+  setExercisePhaseText('Prompt');
+  setExerciseAttemptText(`Listen: ${prompt.notes.length} notes`);
+  setExerciseFeedback(
+    `${exerciseState.randomMelodyUseDelay ? 'Memorize this melody.' : 'Listen and sing back immediately.'} ${tonicName} ${scaleTypeLabel} ${directionLabel.toLowerCase()}.`,
+    'neutral',
+  );
+  setExerciseLiveReadout(null);
+
+  setStatus('Random melody prompt playing', true);
+  for (let index = 0; index < prompt.notes.length; index += 1) {
+    if (
+      !exerciseState.active ||
+      exerciseState.selectedExercise !== 'random-melody'
+    ) {
+      return;
+    }
+
+    await playReferenceToneForDuration(
+      prompt.notes[index],
+      RANDOM_MELODY_PROMPT_NOTE_MS,
+    );
+    await waitMs(RANDOM_MELODY_PROMPT_GAP_MS);
+  }
+
+  if (
+    !exerciseState.active ||
+    exerciseState.selectedExercise !== 'random-melody'
+  ) {
+    return;
+  }
+
+  if (exerciseState.randomMelodyUseDelay) {
+    exerciseState.phase = 'melody-wait';
+    setExercisePhaseText('Delay');
+    setExerciseAttemptText('Hold the melody in memory');
+    setExerciseFeedback(
+      `Singing starts in ${exerciseState.randomMelodyDelaySeconds} seconds...`,
+      'neutral',
+    );
+    await waitMs(exerciseState.randomMelodyDelaySeconds * 1000);
+  }
+
+  if (
+    !exerciseState.active ||
+    exerciseState.selectedExercise !== 'random-melody'
+  ) {
+    return;
+  }
+
+  exerciseState.phase = 'melody-sing';
+  exerciseState.scaleSingStartedAt = performance.now();
+  exerciseState.attemptStartedAt = exerciseState.scaleSingStartedAt;
+  setExercisePhaseText('Sing melody');
+  setExerciseAttemptText(
+    `Note 1/${prompt.notes.length}: ${midiToNoteName(prompt.notes[0])}`,
+  );
+  setExerciseFeedback(
+    `Sing the melody back in order. Hold each note for ${getHoldTargetSecondsText()}.`,
+    'neutral',
+  );
+  setStatus('Random melody listening', true);
 }
 
 function finalizeRandomScaleDegreeAttempt(success) {
@@ -3455,6 +4006,8 @@ function updateFromAudio() {
         updatePitchMemoryExercise(sample);
       } else if (exerciseState.selectedExercise === 'follow-scale') {
         updateFollowScaleExercise(sample);
+      } else if (exerciseState.selectedExercise === 'random-melody') {
+        updateRandomMelodyExercise(sample);
       } else if (exerciseState.selectedExercise === 'match-scale') {
         updateScaleExercise(sample);
       } else if (exerciseState.selectedExercise === 'random-scale-degree') {
@@ -3471,6 +4024,8 @@ function updateFromAudio() {
     const expectsSingingNow =
       exerciseState.active &&
       (exerciseState.selectedExercise === 'pitch-matching' ||
+        (exerciseState.selectedExercise === 'random-melody' &&
+          exerciseState.phase === 'melody-sing') ||
         (exerciseState.selectedExercise === 'random-scale-degree' &&
           exerciseState.phase === 'random-degree-sing') ||
         (exerciseState.selectedExercise === 'follow-scale' &&
@@ -3545,6 +4100,19 @@ function updateFromAudio() {
       finalizeScaleExerciseAttempt(
         false,
         'Time ran out before all scale degrees were completed.',
+      );
+    }
+
+    if (
+      exerciseState.active &&
+      exerciseState.selectedExercise === 'random-melody' &&
+      exerciseState.phase === 'melody-sing' &&
+      exerciseState.scaleSingStartedAt != null &&
+      now - exerciseState.scaleSingStartedAt >= EXERCISE_SCALE_TOTAL_TIMEOUT_MS
+    ) {
+      finalizeRandomMelodyAttempt(
+        false,
+        'Time ran out before all melody notes were completed.',
       );
     }
   }
@@ -3717,6 +4285,42 @@ if (exerciseFixedTonic) {
   );
 }
 
+if (exerciseMelodyStartTonic) {
+  exerciseMelodyStartTonic.addEventListener(
+    'change',
+    syncRandomMelodyAlwaysStartTonicFromInput,
+  );
+}
+
+if (exerciseMelodyNoteCount) {
+  exerciseMelodyNoteCount.addEventListener(
+    'change',
+    syncRandomMelodyNoteCountFromInput,
+  );
+  exerciseMelodyNoteCount.addEventListener(
+    'blur',
+    syncRandomMelodyNoteCountFromInput,
+  );
+}
+
+if (exerciseMelodyDelayEnabled) {
+  exerciseMelodyDelayEnabled.addEventListener(
+    'change',
+    syncRandomMelodyUseDelayFromInput,
+  );
+}
+
+if (exerciseMelodyDelaySeconds) {
+  exerciseMelodyDelaySeconds.addEventListener(
+    'change',
+    syncRandomMelodyDelaySecondsFromInput,
+  );
+  exerciseMelodyDelaySeconds.addEventListener(
+    'blur',
+    syncRandomMelodyDelaySecondsFromInput,
+  );
+}
+
 if (exerciseType) {
   exerciseType.addEventListener('change', () => {
     setSelectedExercise(exerciseType.value);
@@ -3737,6 +4341,11 @@ if (exerciseStartButton) {
 
     if (exerciseState.selectedExercise === 'follow-scale') {
       await startFollowScaleExercise();
+      return;
+    }
+
+    if (exerciseState.selectedExercise === 'random-melody') {
+      await startRandomMelodyExercise();
       return;
     }
 
@@ -3788,6 +4397,10 @@ syncExerciseGradingFromInput();
 syncExerciseHintsFromInput();
 syncExerciseScaleTypeFromInput();
 syncExerciseScaleDirectionFromInput();
+syncRandomMelodyAlwaysStartTonicFromInput();
+syncRandomMelodyNoteCountFromInput();
+syncRandomMelodyUseDelayFromInput();
+syncRandomMelodyDelaySecondsFromInput();
 syncRandomDegreeUseRandomTonicFromInput();
 syncRandomDegreeFixedTonicFromInput();
 syncExerciseRangeFromInputs();
