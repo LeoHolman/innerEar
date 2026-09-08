@@ -347,6 +347,10 @@ body::before {
   gap: 8px;
 }
 
+.exercise-field[hidden] {
+  display: none !important;
+}
+
 .exercise-field--wide {
   grid-column: 1 / -1;
 }

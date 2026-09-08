@@ -39,7 +39,7 @@ You can also use any other local static file server, as long as it serves the fi
 
 - A microphone start/stop button
 - An Exercises button with a Pitch Matching preset
-- Exercise presets for Pitch Matching, Pitch Memory, Match the Scale, Follow the Scale, and Random Scale Degree
+- Exercise presets for Pitch Matching, Pitch Memory, Sing the Scale, Follow the Scale, and Random Scale Degree
 - Live note, frequency, and cents readouts
 - A vertical piano-roll visualization with note guide lines
 
@@ -65,9 +65,9 @@ Open Exercises, switch the Exercise selector to Pitch Memory, then:
 - The app reveals the target note and reports success or try-again after each attempt.
 - Pitch Memory keeps an 8-second default delay value.
 
-## Match the Scale
+## Sing the Scale
 
-Open Exercises, switch the Exercise selector to Match the Scale, then:
+Open Exercises, switch the Exercise selector to Sing the Scale, then:
 
 - Set your lowest and highest comfortable notes.
 - Choose the scale type (Major, Minor, or Pentatonic).
