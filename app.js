@@ -1368,6 +1368,31 @@ function buildScaleNotes(rootMidi, scaleType) {
   return offsets.map((offset) => rootMidi + offset);
 }
 
+function getScaleDegreeNumberForMidi(midi, tonicMidi, scaleType) {
+  if (tonicMidi == null || !Number.isFinite(midi)) {
+    return null;
+  }
+
+  const semitoneDelta = Math.round(midi - tonicMidi);
+  const normalizedDelta = ((semitoneDelta % 12) + 12) % 12;
+  const pattern = getScalePattern(scaleType);
+
+  const degreeIndex = pattern.findIndex((offset) => {
+    const normalizedOffset = ((offset % 12) + 12) % 12;
+    return normalizedOffset === normalizedDelta;
+  });
+
+  if (degreeIndex < 0) {
+    return null;
+  }
+
+  if (normalizedDelta === 0 && semitoneDelta !== 0) {
+    return pattern.length;
+  }
+
+  return degreeIndex + 1;
+}
+
 function chooseFollowScaleRootMidi(scaleType) {
   const offsets = getScalePattern(scaleType);
   const highestOffset = Math.max(...offsets);
@@ -1869,6 +1894,11 @@ function finalizeScaleExerciseAttempt(success, failureReason = '') {
       midi,
       startMs: index * stepHoldMs,
       endMs: (index + 1) * stepHoldMs,
+      degree: getScaleDegreeNumberForMidi(
+        midi,
+        rootMidi,
+        exerciseState.scaleType,
+      ),
     })),
     actualSamples: scaleRecordedSamples,
     durationMs: reviewDurationMs,
@@ -2277,6 +2307,11 @@ function finalizeFollowScaleExerciseAttempt(success, failureReason = '') {
       midi,
       startMs: index * stepHoldMs,
       endMs: (index + 1) * stepHoldMs,
+      degree: getScaleDegreeNumberForMidi(
+        midi,
+        rootMidi,
+        exerciseState.scaleType,
+      ),
     })),
     actualSamples: scaleRecordedSamples,
     durationMs: reviewDurationMs,
@@ -2458,6 +2493,11 @@ function finalizeRandomMelodyAttempt(success, failureReason = '') {
       midi,
       startMs: index * stepHoldMs,
       endMs: (index + 1) * stepHoldMs,
+      degree: getScaleDegreeNumberForMidi(
+        midi,
+        tonicMidi,
+        exerciseState.scaleType,
+      ),
     })),
     actualSamples: recordedSamples,
     durationMs: Math.max(recordedDurationMs, targetDurationMs),
@@ -3734,8 +3774,20 @@ function drawScaleReviewOverlay(ctx, width, height, centerMidi) {
     const scaledEndMs = segment.endMs * expectedTimeScale;
     const x1 = leftRailWidth + (scaledStartMs / safeDuration) * trailWidth;
     const x2 = leftRailWidth + (scaledEndMs / safeDuration) * trailWidth;
-    ctx.fillRect(x1, y - bandHalf, Math.max(1, x2 - x1), bandHalf * 2);
-    ctx.strokeRect(x1, y - bandHalf, Math.max(1, x2 - x1), bandHalf * 2);
+    const segmentWidth = Math.max(1, x2 - x1);
+    ctx.fillRect(x1, y - bandHalf, segmentWidth, bandHalf * 2);
+    ctx.strokeRect(x1, y - bandHalf, segmentWidth, bandHalf * 2);
+
+    if (segment.degree != null) {
+      ctx.fillStyle = 'rgba(255, 214, 110, 0.98)';
+      ctx.font = `${10 * devicePixelRatioValue}px Space Grotesk, sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(String(segment.degree), x1 + segmentWidth / 2, y);
+      ctx.fillStyle = 'rgba(255, 214, 110, 0.2)';
+      ctx.textAlign = 'start';
+      ctx.textBaseline = 'alphabetic';
+    }
   }
 
   ctx.setLineDash([]);
