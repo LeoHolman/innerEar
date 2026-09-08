@@ -62,6 +62,7 @@ const exerciseScaleDirection = document.getElementById(
 const exerciseScaleDirectionField = document.getElementById(
   'exerciseScaleDirectionField',
 );
+const exerciseGrading = document.getElementById('exerciseGrading');
 const exerciseRandomTonicField = document.getElementById(
   'exerciseRandomTonicField',
 );
@@ -131,6 +132,8 @@ const EXERCISE_SCALE_TOTAL_TIMEOUT_MS = 36000;
 const FOLLOW_SCALE_PROMPT_MS = 1000;
 const FOLLOW_SCALE_TOAST_PAUSE_MS = 500;
 const RANDOM_SCALE_DEGREE_SCALE_TYPE = 'major';
+const EXERCISE_LAX_TOLERANCE_MULTIPLIER = 1.5;
+const EXERCISE_LAX_HOLD_MULTIPLIER = 0.75;
 
 const SCALE_PATTERNS = {
   major: [0, 2, 4, 5, 7, 9, 11, 12],
@@ -147,6 +150,11 @@ const SCALE_LABELS = {
 const SCALE_DIRECTIONS = {
   ascending: 'ascending',
   descending: 'descending',
+};
+
+const GRADING_MODES = {
+  strict: 'strict',
+  lax: 'lax',
 };
 
 const EXERCISE_PRESETS = {
@@ -196,6 +204,7 @@ const exerciseState = {
   rangeLowMidi: 48,
   rangeHighMidi: 60,
   memoryDelaySeconds: EXERCISE_MEMORY_DEFAULT_DELAY_SECONDS,
+  gradingMode: GRADING_MODES.strict,
   scaleType: 'major',
   scaleDirection: SCALE_DIRECTIONS.ascending,
   scaleNotes: [],
@@ -320,6 +329,7 @@ function savePersistedSettings() {
       rangeLowMidi: exerciseState.rangeLowMidi,
       rangeHighMidi: exerciseState.rangeHighMidi,
       memoryDelaySeconds: exerciseState.memoryDelaySeconds,
+      gradingMode: exerciseState.gradingMode,
       scaleType: exerciseState.scaleType,
       scaleDirection: exerciseState.scaleDirection,
       randomDegreeUseRandomTonic: exerciseState.randomDegreeUseRandomTonic,
@@ -383,6 +393,13 @@ function loadPersistedSettings() {
           EXERCISE_MEMORY_MAX_DELAY_SECONDS,
         ),
       );
+    }
+
+    if (
+      settings.gradingMode === GRADING_MODES.strict ||
+      settings.gradingMode === GRADING_MODES.lax
+    ) {
+      exerciseState.gradingMode = settings.gradingMode;
     }
 
     if (
@@ -451,6 +468,10 @@ function applyExerciseStateToInputs() {
     exerciseMemoryDelay.value = String(exerciseState.memoryDelaySeconds);
   }
 
+  if (exerciseGrading) {
+    exerciseGrading.value = exerciseState.gradingMode;
+  }
+
   if (exerciseScaleType) {
     exerciseScaleType.value = exerciseState.scaleType;
   }
@@ -517,7 +538,7 @@ function setExerciseDetailsCollapsed(isCollapsed) {
 }
 
 function describeDirectionFromTarget(deltaSemitones) {
-  if (Math.abs(deltaSemitones) <= EXERCISE_MATCH_TOLERANCE) {
+  if (Math.abs(deltaSemitones) <= getMatchToleranceSemitones()) {
     return 'On target';
   }
 
@@ -526,6 +547,43 @@ function describeDirectionFromTarget(deltaSemitones) {
   }
 
   return `Too high by ${deltaSemitones.toFixed(2)} semitones`;
+}
+
+function isLaxGrading() {
+  return exerciseState.gradingMode === GRADING_MODES.lax;
+}
+
+function getMatchToleranceSemitones() {
+  return (
+    EXERCISE_MATCH_TOLERANCE *
+    (isLaxGrading() ? EXERCISE_LAX_TOLERANCE_MULTIPLIER : 1)
+  );
+}
+
+function getMatchToleranceCents() {
+  return Math.round(getMatchToleranceSemitones() * 100);
+}
+
+function getHoldTargetMs() {
+  return Math.round(
+    EXERCISE_SUCCESS_HOLD_MS *
+      (isLaxGrading() ? EXERCISE_LAX_HOLD_MULTIPLIER : 1),
+  );
+}
+
+function getScaleStepHoldTargetMs() {
+  return Math.round(
+    EXERCISE_SCALE_STEP_HOLD_MS *
+      (isLaxGrading() ? EXERCISE_LAX_HOLD_MULTIPLIER : 1),
+  );
+}
+
+function getHoldTargetSecondsText() {
+  const seconds = getHoldTargetMs() / 1000;
+  const rendered = Number.isInteger(seconds)
+    ? String(seconds)
+    : seconds.toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
+  return `${rendered} second${seconds === 1 ? '' : 's'}`;
 }
 
 function setExerciseLiveReadout(sample) {
@@ -782,6 +840,21 @@ function syncExerciseMemoryDelayFromInput() {
   savePersistedSettings();
 }
 
+function syncExerciseGradingFromInput() {
+  if (!exerciseGrading) {
+    return;
+  }
+
+  const nextMode =
+    exerciseGrading.value === GRADING_MODES.lax
+      ? GRADING_MODES.lax
+      : GRADING_MODES.strict;
+
+  exerciseState.gradingMode = nextMode;
+  exerciseGrading.value = nextMode;
+  savePersistedSettings();
+}
+
 function syncExerciseScaleTypeFromInput() {
   if (!exerciseScaleType) {
     return;
@@ -890,6 +963,10 @@ function updateExercisePresetUi() {
 
   if (exerciseScaleDirectionField && isFollowScale) {
     exerciseScaleDirectionField.hidden = true;
+  }
+
+  if (exerciseGrading && exerciseGrading.value !== exerciseState.gradingMode) {
+    exerciseGrading.value = exerciseState.gradingMode;
   }
 
   if (exerciseRandomTonic) {
@@ -1229,8 +1306,10 @@ async function startPitchMatchingExercise() {
 
   setExerciseAttemptText('Listen to the prompt');
   setExercisePhaseText('Prompt');
+  const toleranceCents = getMatchToleranceCents();
+  const holdTargetText = getHoldTargetSecondsText();
   setExerciseFeedback(
-    `Listen first, then match the hidden tone within +/-${EXERCISE_MATCH_TOLERANCE_CENTS} cents and hold it for 1 second.`,
+    `Listen first, then match the hidden tone within +/-${toleranceCents} cents and hold it for ${holdTargetText}.`,
     'neutral',
   );
   setExerciseRevealText('Hidden');
@@ -1268,7 +1347,7 @@ async function startPitchMatchingExercise() {
   setExerciseAttemptText('Listening for a match');
   setExercisePhaseText('Match');
   setExerciseFeedback(
-    `Match the hidden tone now and hold for 1 second.`,
+    `Match the hidden tone now and hold for ${holdTargetText}.`,
     'neutral',
   );
 }
@@ -1282,9 +1361,9 @@ function finalizePitchMemoryAttempt(success) {
   const detectedSample = exerciseState.lastDetectedSample;
   const attemptSummary = detectedSample
     ? ` Your closest stable note was ${midiToNoteName(detectedSample.midi)} at ${detectedSample.frequency.toFixed(1)} Hz.`
-    : ' No stable sung note was detected during the one-second sing window.';
+    : ` No stable sung note was detected during the ${getHoldTargetSecondsText()} sing window.`;
   const message = success
-    ? `Success. You recalled ${revealedNote} and held it for 1 second.`
+    ? `Success. You recalled ${revealedNote} and held it for ${getHoldTargetSecondsText()}.`
     : `Try again. The target note was ${revealedNote}.${attemptSummary}`;
 
   clearExerciseTimers();
@@ -1318,8 +1397,9 @@ function beginPitchMemorySingWindow() {
   setExerciseCountdownText('Go');
   setExerciseAttemptText('Sing now');
   setExercisePhaseText('Sing');
+  const holdTargetText = getHoldTargetSecondsText();
   setExerciseFeedback(
-    `Sing the remembered pitch for up to 3 seconds. Hold in tune for 1 second within +/-${EXERCISE_MATCH_TOLERANCE_CENTS} cents.`,
+    `Sing the remembered pitch for up to 3 seconds. Hold in tune for ${holdTargetText} within +/-${getMatchToleranceCents()} cents.`,
     'neutral',
   );
   setStatus('Pitch memory: sing now', true);
@@ -1432,6 +1512,7 @@ async function startPitchMemoryExercise() {
 
 function finalizeScaleExerciseAttempt(success, failureReason = '') {
   const scaleNotes = [...exerciseState.scaleNotes];
+  const stepHoldMs = getScaleStepHoldTargetMs();
   const scaleTypeLabel = SCALE_LABELS[exerciseState.scaleType] || 'Scale';
   const directionLabel = getScaleDirectionLabel(exerciseState.scaleDirection);
   const rootMidi = exerciseState.targetMidi;
@@ -1442,17 +1523,17 @@ function finalizeScaleExerciseAttempt(success, failureReason = '') {
 
   const recordedDurationMs =
     singStartedAt == null
-      ? scaleNotes.length * EXERCISE_SCALE_STEP_HOLD_MS
+      ? scaleNotes.length * stepHoldMs
       : Math.max(1, now - singStartedAt);
 
-  const targetDurationMs = scaleNotes.length * EXERCISE_SCALE_STEP_HOLD_MS;
+  const targetDurationMs = scaleNotes.length * stepHoldMs;
   const reviewDurationMs = Math.max(recordedDurationMs, targetDurationMs);
 
   exerciseState.scaleReview = {
     expectedSegments: scaleNotes.map((midi, index) => ({
       midi,
-      startMs: index * EXERCISE_SCALE_STEP_HOLD_MS,
-      endMs: (index + 1) * EXERCISE_SCALE_STEP_HOLD_MS,
+      startMs: index * stepHoldMs,
+      endMs: (index + 1) * stepHoldMs,
     })),
     actualSamples: scaleRecordedSamples,
     durationMs: reviewDurationMs,
@@ -1468,7 +1549,7 @@ function finalizeScaleExerciseAttempt(success, failureReason = '') {
 
   if (success) {
     setExerciseFeedback(
-      `Success. You completed ${rootName} ${scaleTypeLabel} ${directionLabel.toLowerCase()} with one-second holds.`,
+      `Success. You completed ${rootName} ${scaleTypeLabel} ${directionLabel.toLowerCase()} with ${getHoldTargetSecondsText()} holds.`,
       'success',
     );
     setStatus('Exercise success', true);
@@ -1500,6 +1581,8 @@ function updateScaleExercise(sample) {
     exerciseState.scaleNotes.length - 1,
   );
   const targetMidi = exerciseState.scaleNotes[currentIndex];
+  const tolerance = getMatchToleranceSemitones();
+  const stepHoldMs = getScaleStepHoldTargetMs();
 
   if (exerciseState.scaleSingStartedAt != null) {
     exerciseState.scaleRecordedSamples.push({
@@ -1511,7 +1594,7 @@ function updateScaleExercise(sample) {
 
   const withinTolerance =
     sample.confidence >= EXERCISE_MIN_CONFIDENCE &&
-    Math.abs(sample.midi - targetMidi) <= EXERCISE_MATCH_TOLERANCE;
+    Math.abs(sample.midi - targetMidi) <= tolerance;
 
   if (withinTolerance) {
     if (exerciseState.holdStartTime == null) {
@@ -1521,8 +1604,7 @@ function updateScaleExercise(sample) {
     exerciseState.lastInTuneTime = now;
     const heldMs = now - exerciseState.holdStartTime;
     const progress =
-      (currentIndex + heldMs / EXERCISE_SCALE_STEP_HOLD_MS) /
-      exerciseState.scaleNotes.length;
+      (currentIndex + heldMs / stepHoldMs) / exerciseState.scaleNotes.length;
     setExerciseProgress(progress);
     setExerciseAttemptText(
       `Degree ${currentIndex + 1}/${exerciseState.scaleNotes.length}: ${midiToNoteName(targetMidi)} (${(heldMs / 1000).toFixed(2)}s)`,
@@ -1532,7 +1614,7 @@ function updateScaleExercise(sample) {
       'neutral',
     );
 
-    if (heldMs >= EXERCISE_SCALE_STEP_HOLD_MS) {
+    if (heldMs >= stepHoldMs) {
       const nextIndex = currentIndex + 1;
       exerciseState.scaleStepIndex = nextIndex;
       exerciseState.holdStartTime = null;
@@ -1548,7 +1630,7 @@ function updateScaleExercise(sample) {
         `Next degree ${nextIndex + 1}/${exerciseState.scaleNotes.length}: ${midiToNoteName(nextTarget)}`,
       );
       setExerciseFeedback(
-        'Move up to the next scale note and hold for one second.',
+        `Move up to the next scale note and hold for ${getHoldTargetSecondsText()}.`,
         'neutral',
       );
     }
@@ -1563,8 +1645,7 @@ function updateScaleExercise(sample) {
   ) {
     const heldMs = now - exerciseState.holdStartTime;
     const progress =
-      (currentIndex + heldMs / EXERCISE_SCALE_STEP_HOLD_MS) /
-      exerciseState.scaleNotes.length;
+      (currentIndex + heldMs / stepHoldMs) / exerciseState.scaleNotes.length;
     setExerciseProgress(progress);
     setExerciseAttemptText(
       `Degree ${currentIndex + 1}/${exerciseState.scaleNotes.length}: ${midiToNoteName(targetMidi)} (${(heldMs / 1000).toFixed(2)}s)`,
@@ -1614,6 +1695,8 @@ function updateFollowScaleExercise(sample) {
     exerciseState.scaleNotes.length - 1,
   );
   const targetMidi = exerciseState.scaleNotes[currentIndex];
+  const tolerance = getMatchToleranceSemitones();
+  const stepHoldMs = getScaleStepHoldTargetMs();
 
   if (exerciseState.scaleSingStartedAt != null) {
     exerciseState.scaleRecordedSamples.push({
@@ -1625,7 +1708,7 @@ function updateFollowScaleExercise(sample) {
 
   const withinTolerance =
     sample.confidence >= EXERCISE_MIN_CONFIDENCE &&
-    Math.abs(sample.midi - targetMidi) <= EXERCISE_MATCH_TOLERANCE;
+    Math.abs(sample.midi - targetMidi) <= tolerance;
 
   if (withinTolerance) {
     if (exerciseState.holdStartTime == null) {
@@ -1635,8 +1718,7 @@ function updateFollowScaleExercise(sample) {
     exerciseState.lastInTuneTime = now;
     const heldMs = now - exerciseState.holdStartTime;
     const progress =
-      (currentIndex + heldMs / EXERCISE_SCALE_STEP_HOLD_MS) /
-      exerciseState.scaleNotes.length;
+      (currentIndex + heldMs / stepHoldMs) / exerciseState.scaleNotes.length;
     setExerciseProgress(progress);
     setExerciseAttemptText(
       `Degree ${currentIndex + 1}/${exerciseState.scaleNotes.length}: ${midiToNoteName(targetMidi)} (${(heldMs / 1000).toFixed(2)}s)`,
@@ -1648,7 +1730,7 @@ function updateFollowScaleExercise(sample) {
       'neutral',
     );
 
-    if (heldMs >= EXERCISE_SCALE_STEP_HOLD_MS) {
+    if (heldMs >= stepHoldMs) {
       const nextIndex = currentIndex + 1;
       exerciseState.scaleStepIndex = nextIndex;
       exerciseState.holdStartTime = null;
@@ -1697,8 +1779,7 @@ function updateFollowScaleExercise(sample) {
   ) {
     const heldMs = now - exerciseState.holdStartTime;
     const progress =
-      (currentIndex + heldMs / EXERCISE_SCALE_STEP_HOLD_MS) /
-      exerciseState.scaleNotes.length;
+      (currentIndex + heldMs / stepHoldMs) / exerciseState.scaleNotes.length;
     setExerciseProgress(progress);
     setExerciseAttemptText(
       `Degree ${currentIndex + 1}/${exerciseState.scaleNotes.length}: ${midiToNoteName(targetMidi)} (${(heldMs / 1000).toFixed(2)}s)`,
@@ -1788,7 +1869,7 @@ async function startScaleExercise() {
   setExercisePhaseText('Prompt');
   setExerciseAttemptText('Listen to the tonic');
   setExerciseFeedback(
-    `Tonic is ${midiToNoteName(rootMidi)}. Then sing each degree of the ${directionLabel.toLowerCase()} ${scaleTypeLabel.toLowerCase()} scale, holding each note for 1 second.`,
+    `Tonic is ${midiToNoteName(rootMidi)}. Then sing each degree of the ${directionLabel.toLowerCase()} ${scaleTypeLabel.toLowerCase()} scale, holding each note for ${getHoldTargetSecondsText()}.`,
     'neutral',
   );
   setExerciseLiveReadout(null);
@@ -1836,6 +1917,7 @@ async function startScaleExercise() {
 
 function finalizeFollowScaleExerciseAttempt(success, failureReason = '') {
   const scaleNotes = [...exerciseState.scaleNotes];
+  const stepHoldMs = getScaleStepHoldTargetMs();
   const scaleTypeLabel = SCALE_LABELS[exerciseState.scaleType] || 'Scale';
   const rootMidi = exerciseState.targetMidi;
   const rootName = rootMidi != null ? midiToNoteName(rootMidi) : '--';
@@ -1845,17 +1927,17 @@ function finalizeFollowScaleExerciseAttempt(success, failureReason = '') {
 
   const recordedDurationMs =
     singStartedAt == null
-      ? scaleNotes.length * EXERCISE_SCALE_STEP_HOLD_MS
+      ? scaleNotes.length * stepHoldMs
       : Math.max(1, now - singStartedAt);
 
-  const targetDurationMs = scaleNotes.length * EXERCISE_SCALE_STEP_HOLD_MS;
+  const targetDurationMs = scaleNotes.length * stepHoldMs;
   const reviewDurationMs = Math.max(recordedDurationMs, targetDurationMs);
 
   exerciseState.scaleReview = {
     expectedSegments: scaleNotes.map((midi, index) => ({
       midi,
-      startMs: index * EXERCISE_SCALE_STEP_HOLD_MS,
-      endMs: (index + 1) * EXERCISE_SCALE_STEP_HOLD_MS,
+      startMs: index * stepHoldMs,
+      endMs: (index + 1) * stepHoldMs,
     })),
     actualSamples: scaleRecordedSamples,
     durationMs: reviewDurationMs,
@@ -1944,7 +2026,7 @@ async function startFollowScaleStep(stepIndex) {
     `Degree ${currentIndex + 1}/${exerciseState.scaleNotes.length}: ${midiToNoteName(targetMidi)}`,
   );
   setExerciseFeedback(
-    'Sing the prompt pitch and hold it for 1 second before the scale moves on.',
+    `Sing the prompt pitch and hold it for ${getHoldTargetSecondsText()} before the scale moves on.`,
     'neutral',
   );
   setStatus('Follow the scale listening', true);
@@ -2004,7 +2086,7 @@ async function startFollowScaleExercise() {
   setExercisePhaseText('Prompt');
   setExerciseAttemptText('Listen to the tonic');
   setExerciseFeedback(
-    `Hear the tonic ${midiToNoteName(rootMidi)} for half a second, then sing it back before moving through the rest of the ${scaleTypeLabel.toLowerCase()} scale.`,
+    `Hear the tonic ${midiToNoteName(rootMidi)} for one second, then sing it back before moving through the rest of the ${scaleTypeLabel.toLowerCase()} scale.`,
     'neutral',
   );
   setExerciseLiveReadout(null);
@@ -2068,7 +2150,9 @@ function updateRandomScaleDegreeExercise(sample) {
   const withinTolerance =
     sample.confidence >= EXERCISE_MIN_CONFIDENCE &&
     Math.abs(sample.midi - exerciseState.targetMidi) <=
-      EXERCISE_MATCH_TOLERANCE;
+      getMatchToleranceSemitones();
+
+  const holdTargetMs = getHoldTargetMs();
 
   if (withinTolerance) {
     if (exerciseState.holdStartTime == null) {
@@ -2082,9 +2166,9 @@ function updateRandomScaleDegreeExercise(sample) {
       'Keep holding the target degree until the bar fills.',
       'neutral',
     );
-    setExerciseProgress(heldMs / EXERCISE_SUCCESS_HOLD_MS);
+    setExerciseProgress(heldMs / holdTargetMs);
 
-    if (heldMs >= EXERCISE_SUCCESS_HOLD_MS) {
+    if (heldMs >= holdTargetMs) {
       finalizeRandomScaleDegreeAttempt(true);
     }
 
@@ -2102,9 +2186,9 @@ function updateRandomScaleDegreeExercise(sample) {
       'Close. Keep the degree centered and steady.',
       'neutral',
     );
-    setExerciseProgress(heldMs / EXERCISE_SUCCESS_HOLD_MS);
+    setExerciseProgress(heldMs / holdTargetMs);
 
-    if (heldMs >= EXERCISE_SUCCESS_HOLD_MS) {
+    if (heldMs >= holdTargetMs) {
       finalizeRandomScaleDegreeAttempt(true);
     }
 
@@ -2171,8 +2255,8 @@ async function startRandomScaleDegreeExercise() {
   setExerciseAttemptText('Listen to the tonic');
   setExerciseFeedback(
     exerciseState.randomDegreeUseRandomTonic
-      ? `Tonic is ${midiToNoteName(prompt.tonicMidi)}. Sing scale degree ${prompt.degreeNumber} and hold for 1 second.`
-      : `Fixed tonic is ${midiToNoteName(prompt.tonicMidi)}. Sing scale degree ${prompt.degreeNumber} and hold for 1 second.`,
+      ? `Tonic is ${midiToNoteName(prompt.tonicMidi)}. Sing scale degree ${prompt.degreeNumber} and hold for ${getHoldTargetSecondsText()}.`
+      : `Fixed tonic is ${midiToNoteName(prompt.tonicMidi)}. Sing scale degree ${prompt.degreeNumber} and hold for ${getHoldTargetSecondsText()}.`,
     'neutral',
   );
   setExerciseLiveReadout(null);
@@ -2208,7 +2292,7 @@ async function startRandomScaleDegreeExercise() {
   setExercisePhaseText('Sing degree');
   setExerciseAttemptText(`Sing degree ${prompt.degreeNumber}`);
   setExerciseFeedback(
-    'Match the requested degree and hold for one second.',
+    `Match the requested degree and hold for ${getHoldTargetSecondsText()}.`,
     'neutral',
   );
   setStatus('Random degree listening', true);
@@ -2225,7 +2309,7 @@ function finalizePitchMatchingAttempt(success) {
     ? ` You were closest to ${midiToNoteName(detectedSample.midi)} at ${detectedSample.frequency.toFixed(1)} Hz.`
     : ' No stable sung note was detected during the attempt.';
   const message = success
-    ? `Success. You matched ${revealedNote} for 1 second.`
+    ? `Success. You matched ${revealedNote} for ${getHoldTargetSecondsText()}.`
     : `Try again. The target note was ${revealedNote}.${attemptSummary}`;
 
   clearExerciseTimers();
@@ -2257,7 +2341,8 @@ function updatePitchMatchingExercise(sample) {
   const withinTolerance =
     sample.confidence >= EXERCISE_MIN_CONFIDENCE &&
     Math.abs(sample.midi - exerciseState.targetMidi) <=
-      EXERCISE_MATCH_TOLERANCE;
+      getMatchToleranceSemitones();
+  const holdTargetMs = getHoldTargetMs();
   const deltaSemitones = sample.midi - exerciseState.targetMidi;
 
   if (withinTolerance) {
@@ -2272,9 +2357,9 @@ function updatePitchMatchingExercise(sample) {
       'Keep holding the pitch steady until the bar fills.',
       'neutral',
     );
-    setExerciseProgress(heldMs / EXERCISE_SUCCESS_HOLD_MS);
+    setExerciseProgress(heldMs / holdTargetMs);
 
-    if (heldMs >= EXERCISE_SUCCESS_HOLD_MS) {
+    if (heldMs >= holdTargetMs) {
       finalizePitchMatchingAttempt(true);
     }
 
@@ -2292,9 +2377,9 @@ function updatePitchMatchingExercise(sample) {
       'Close enough. Keep the pitch centered and steady.',
       'neutral',
     );
-    setExerciseProgress(heldMs / EXERCISE_SUCCESS_HOLD_MS);
+    setExerciseProgress(heldMs / holdTargetMs);
 
-    if (heldMs >= EXERCISE_SUCCESS_HOLD_MS) {
+    if (heldMs >= holdTargetMs) {
       finalizePitchMatchingAttempt(true);
     }
 
@@ -2335,7 +2420,8 @@ function updatePitchMemoryExercise(sample) {
   const withinTolerance =
     sample.confidence >= EXERCISE_MIN_CONFIDENCE &&
     Math.abs(sample.midi - exerciseState.targetMidi) <=
-      EXERCISE_MATCH_TOLERANCE;
+      getMatchToleranceSemitones();
+  const holdTargetMs = getHoldTargetMs();
 
   if (withinTolerance) {
     if (exerciseState.holdStartTime == null) {
@@ -2350,9 +2436,9 @@ function updatePitchMemoryExercise(sample) {
       'Keep holding through the end of the sing window.',
       'neutral',
     );
-    setExerciseProgress(heldMs / EXERCISE_SUCCESS_HOLD_MS);
+    setExerciseProgress(heldMs / holdTargetMs);
 
-    if (heldMs >= EXERCISE_SUCCESS_HOLD_MS) {
+    if (heldMs >= holdTargetMs) {
       finalizePitchMemoryAttempt(true);
       return;
     }
@@ -2364,9 +2450,9 @@ function updatePitchMemoryExercise(sample) {
     const heldMs = now - exerciseState.holdStartTime;
     setExerciseAttemptText(`Sing now: ${(heldMs / 1000).toFixed(2)}s`);
     setExerciseFeedback('Close. Keep steady and centered.', 'neutral');
-    setExerciseProgress(heldMs / EXERCISE_SUCCESS_HOLD_MS);
+    setExerciseProgress(heldMs / holdTargetMs);
 
-    if (heldMs >= EXERCISE_SUCCESS_HOLD_MS) {
+    if (heldMs >= holdTargetMs) {
       finalizePitchMemoryAttempt(true);
       return;
     }
@@ -3501,6 +3587,10 @@ if (exerciseScaleDirection) {
   );
 }
 
+if (exerciseGrading) {
+  exerciseGrading.addEventListener('change', syncExerciseGradingFromInput);
+}
+
 if (exerciseRandomTonic) {
   exerciseRandomTonic.addEventListener(
     'change',
@@ -3582,6 +3672,7 @@ populateRandomDegreeFixedTonicOptions();
 applyExerciseStateToInputs();
 setReferenceVolumeLabel();
 syncExerciseMemoryDelayFromInput();
+syncExerciseGradingFromInput();
 syncExerciseScaleTypeFromInput();
 syncExerciseScaleDirectionFromInput();
 syncRandomDegreeUseRandomTonicFromInput();

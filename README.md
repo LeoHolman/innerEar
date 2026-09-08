@@ -48,10 +48,13 @@ You can also use any other local static file server, as long as it serves the fi
 Open Exercises to launch Pitch Matching.
 
 - Set the lowest and highest notes you can comfortably sing.
+- Choose Grading: Strict or Lax.
 - Start the exercise to hear a hidden prompt tone chosen from that range.
 - After the prompt tone, there is a default 3-second ready delay before matching begins.
 - Sing the pitch back within about +/-35 cents of the target and hold it steadily for one second to succeed.
 - After each attempt, the app reveals the target note and gives success or try-again feedback.
+
+Strict uses the original tolerance and 1-second hold target. Lax uses a wider pitch window and a shorter 0.75-second hold target.
 
 ## Pitch Memory
 
