@@ -3157,18 +3157,33 @@ function drawScaleReviewOverlay(ctx, width, height, centerMidi) {
   const leftRailWidth = 132 * devicePixelRatioValue;
   const rightPadding = 20 * devicePixelRatioValue;
   const trailWidth = Math.max(1, width - leftRailWidth - rightPadding);
-  const safeDuration = Math.max(1, durationMs);
+  const expectedEndMs = expectedSegments.reduce(
+    (maxMs, segment) => Math.max(maxMs, segment.endMs),
+    1,
+  );
+  const actualEndMs = Array.isArray(actualSamples)
+    ? actualSamples.reduce((maxMs, sample) => Math.max(maxMs, sample.timeMs), 0)
+    : 0;
+  const hasActualContour = actualEndMs > 0;
+  const safeDuration = hasActualContour
+    ? Math.max(1, actualEndMs)
+    : Math.max(1, durationMs, expectedEndMs);
+  const expectedTimeScale = hasActualContour ? safeDuration / expectedEndMs : 1;
+  const bandHalf = 11 * devicePixelRatioValue;
 
   ctx.save();
-  ctx.setLineDash([7 * devicePixelRatioValue, 5 * devicePixelRatioValue]);
-  ctx.strokeStyle = 'rgba(255, 214, 110, 0.92)';
-  ctx.lineWidth = 1.5 * devicePixelRatioValue;
+  ctx.setLineDash([9 * devicePixelRatioValue, 6 * devicePixelRatioValue]);
+  ctx.fillStyle = 'rgba(255, 214, 110, 0.2)';
+  ctx.strokeStyle = 'rgba(255, 214, 110, 0.96)';
+  ctx.lineWidth = 2 * devicePixelRatioValue;
 
   for (const segment of expectedSegments) {
     const y = midiToY(segment.midi, height, centerMidi);
-    const x1 = leftRailWidth + (segment.startMs / safeDuration) * trailWidth;
-    const x2 = leftRailWidth + (segment.endMs / safeDuration) * trailWidth;
-    const bandHalf = 7 * devicePixelRatioValue;
+    const scaledStartMs = segment.startMs * expectedTimeScale;
+    const scaledEndMs = segment.endMs * expectedTimeScale;
+    const x1 = leftRailWidth + (scaledStartMs / safeDuration) * trailWidth;
+    const x2 = leftRailWidth + (scaledEndMs / safeDuration) * trailWidth;
+    ctx.fillRect(x1, y - bandHalf, Math.max(1, x2 - x1), bandHalf * 2);
     ctx.strokeRect(x1, y - bandHalf, Math.max(1, x2 - x1), bandHalf * 2);
   }
 
