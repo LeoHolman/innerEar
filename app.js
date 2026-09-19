@@ -97,6 +97,7 @@ const exerciseMelodyDelaySeconds = document.getElementById(
   'exerciseMelodyDelaySeconds',
 );
 const exerciseStartButton = document.getElementById('exerciseStartButton');
+const exerciseReplayButton = document.getElementById('exerciseReplayButton');
 const exerciseDetailsToggle = document.getElementById('exerciseDetailsToggle');
 const exerciseFeedback = document.getElementById('exerciseFeedback');
 const exerciseReveal = document.getElementById('exerciseReveal');
@@ -1154,6 +1155,11 @@ function updateExercisePresetUi() {
     exerciseStartButton.textContent = preset.startLabel;
   }
 
+  if (exerciseReplayButton) {
+    exerciseReplayButton.textContent = getReplayLabel();
+    exerciseReplayButton.hidden = !canReplaySelectedExercise();
+  }
+
   if (exerciseMemoryDelayField) {
     exerciseMemoryDelayField.hidden = !isPitchMemory;
   }
@@ -1629,6 +1635,77 @@ async function replayExerciseTone() {
 
   try {
     await playReferenceToneForDuration(exerciseState.targetMidi);
+  } catch {
+    setExerciseFeedback(
+      'Audio playback was blocked. Tap again to replay.',
+      'warning',
+    );
+  }
+}
+
+function canReplaySelectedExercise() {
+  return ['pitch-matching', 'random-melody', 'random-scale-degree'].includes(
+    exerciseState.selectedExercise,
+  );
+}
+
+function getReplayLabel() {
+  switch (exerciseState.selectedExercise) {
+    case 'pitch-matching':
+      return 'Replay prompt';
+    case 'random-melody':
+      return 'Replay melody';
+    case 'random-scale-degree':
+      return 'Replay tonic';
+    default:
+      return 'Replay exercise';
+  }
+}
+
+async function replaySelectedExercisePrompt() {
+  if (!canReplaySelectedExercise()) {
+    return;
+  }
+
+  if (!running) {
+    await startAudio();
+  }
+
+  if (!running) {
+    return;
+  }
+
+  try {
+    if (exerciseState.selectedExercise === 'random-melody') {
+      if (!exerciseState.scaleNotes || exerciseState.scaleNotes.length === 0) {
+        setExerciseFeedback(
+          'No melody is loaded yet. Start the exercise to create one.',
+          'warning',
+        );
+        return;
+      }
+
+      for (let index = 0; index < exerciseState.scaleNotes.length; index += 1) {
+        await playReferenceToneForDuration(
+          exerciseState.scaleNotes[index],
+          RANDOM_MELODY_PROMPT_NOTE_MS,
+        );
+        await waitMs(RANDOM_MELODY_PROMPT_GAP_MS);
+      }
+      return;
+    }
+
+    const midiToReplay =
+      exerciseState.selectedExercise === 'random-scale-degree'
+        ? exerciseState.randomDegreeTonicMidi ?? exerciseState.targetMidi
+        : exerciseState.targetMidi;
+
+    if (midiToReplay == null) {
+      setExerciseFeedback('There is no prompt to replay yet.', 'warning');
+      return;
+    }
+
+    await playReferenceToneForDuration(midiToReplay);
   } catch {
     setExerciseFeedback(
       'Audio playback was blocked. Tap again to replay.',
@@ -4407,6 +4484,12 @@ if (exerciseStartButton) {
     }
 
     await startPitchMatchingExercise();
+  });
+}
+
+if (exerciseReplayButton) {
+  exerciseReplayButton.addEventListener('click', async () => {
+    await replaySelectedExercisePrompt();
   });
 }
 
