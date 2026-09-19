@@ -60,9 +60,10 @@ body::before {
   position: relative;
   display: grid;
   gap: 22px;
-  width: min(1180px, calc(100vw - 32px));
-  margin: 0 auto;
-  padding: 24px 0 12px;
+  width: 100vw;
+  max-width: none;
+  margin: 0;
+  padding: 8px 0 6px;
 }
 
 .exercise-toast-host {
@@ -173,7 +174,7 @@ body::before {
 }
 
 .hero-copy {
-  max-width: 780px;
+  max-width: 980px;
 }
 
 .hero-copy h1,
@@ -760,8 +761,8 @@ body::before {
 
 @media (max-width: 640px) {
   .app-shell {
-    width: min(100vw - 20px, 1180px);
-    padding: 12px 0 10px;
+    width: 100vw;
+    padding: 8px 0 10px;
   }
 
   .hero-card,
