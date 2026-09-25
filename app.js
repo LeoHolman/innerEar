@@ -1643,6 +1643,39 @@ async function replayExerciseTone() {
   }
 }
 
+function playSuccessDing() {
+  try {
+    const ctx = getReferenceAudioContext();
+    if (ctx.state === 'suspended') {
+      void ctx.resume();
+    }
+
+    const now = ctx.currentTime;
+    const gain = ctx.createGain();
+    const osc = ctx.createOscillator();
+
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(1600, now);
+    osc.frequency.exponentialRampToValueAtTime(2300, now + 0.12);
+
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.2, now + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.17);
+
+    osc.connect(gain);
+    gain.connect(referenceMasterGain);
+    osc.start(now);
+    osc.stop(now + 0.18);
+
+    window.setTimeout(() => {
+      osc.disconnect();
+      gain.disconnect();
+    }, 220);
+  } catch {
+    // Ignore audio failures from a success chime; the exercise feedback should still work.
+  }
+}
+
 function canReplaySelectedExercise() {
   return ['pitch-matching', 'random-melody', 'random-scale-degree'].includes(
     exerciseState.selectedExercise,
@@ -2061,6 +2094,7 @@ function updateScaleExercise(sample) {
     if (heldMs >= stepHoldMs) {
       const nextIndex = currentIndex + 1;
       const clearedLabel = midiToNoteName(targetMidi);
+      playSuccessDing();
       showExerciseToast(`Cleared ${clearedLabel}`, 'success');
       exerciseState.scaleStepIndex = nextIndex;
       exerciseState.holdStartTime = null;
@@ -2184,6 +2218,7 @@ function updateFollowScaleExercise(sample) {
       exerciseState.phase = 'follow-transition';
 
       const clearedLabel = midiToNoteName(targetMidi);
+      playSuccessDing();
       showExerciseToast(`Cleared ${clearedLabel}`, 'success');
 
       if (exerciseState.followScaleAdvanceTimerId != null) {
@@ -2657,6 +2692,7 @@ function updateRandomMelodyExercise(sample) {
 
     if (heldMs >= stepHoldMs) {
       const nextIndex = currentIndex + 1;
+      playSuccessDing();
       showExerciseToast(`Cleared ${midiToNoteName(targetMidi)}`, 'success');
       exerciseState.scaleStepIndex = nextIndex;
       exerciseState.holdStartTime = null;
@@ -3072,6 +3108,10 @@ function finalizePitchMatchingAttempt(success) {
   setExerciseRevealText(revealedNote);
   setExerciseCountdownText('--');
   setStatus(success ? 'Exercise success' : 'Exercise try again', true);
+  if (success) {
+    playSuccessDing();
+  }
+
   showExerciseToast(
     success ? 'Pitch Matching cleared' : 'Pitch Matching failed',
     success ? 'success' : 'warning',
