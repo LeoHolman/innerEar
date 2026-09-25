@@ -66,6 +66,12 @@ const exerciseScaleDirection = document.getElementById(
 const exerciseScaleDirectionField = document.getElementById(
   'exerciseScaleDirectionField',
 );
+const exerciseFullScaleReferenceField = document.getElementById(
+  'exerciseFullScaleReferenceField',
+);
+const exerciseFullScaleReference = document.getElementById(
+  'exerciseFullScaleReference',
+);
 const exerciseGrading = document.getElementById('exerciseGrading');
 const exerciseHints = document.getElementById('exerciseHints');
 const exerciseRandomTonicField = document.getElementById(
@@ -260,6 +266,7 @@ const exerciseState = {
   hintMode: HINT_MODES.all,
   scaleType: 'major',
   scaleDirection: SCALE_DIRECTIONS.ascending,
+  playFullScaleReference: false,
   scaleNotes: [],
   scaleStepIndex: 0,
   scaleSingStartedAt: null,
@@ -391,6 +398,7 @@ function savePersistedSettings() {
       hintMode: exerciseState.hintMode,
       scaleType: exerciseState.scaleType,
       scaleDirection: exerciseState.scaleDirection,
+      playFullScaleReference: exerciseState.playFullScaleReference,
       randomDegreeUseRandomTonic: exerciseState.randomDegreeUseRandomTonic,
       randomDegreeFixedTonicMidi: exerciseState.randomDegreeFixedTonicMidi,
       randomMelodyAlwaysStartTonic: exerciseState.randomMelodyAlwaysStartTonic,
@@ -488,6 +496,10 @@ function loadPersistedSettings() {
       settings.scaleDirection === SCALE_DIRECTIONS.descending
     ) {
       exerciseState.scaleDirection = settings.scaleDirection;
+    }
+
+    if (typeof settings.playFullScaleReference === 'boolean') {
+      exerciseState.playFullScaleReference = settings.playFullScaleReference;
     }
 
     if (typeof settings.randomDegreeUseRandomTonic === 'boolean') {
@@ -594,6 +606,10 @@ function applyExerciseStateToInputs() {
 
   if (exerciseScaleDirection) {
     exerciseScaleDirection.value = exerciseState.scaleDirection;
+  }
+
+  if (exerciseFullScaleReference) {
+    exerciseFullScaleReference.checked = exerciseState.playFullScaleReference;
   }
 
   if (exerciseRandomTonic) {
@@ -1131,6 +1147,17 @@ function syncExerciseScaleDirectionFromInput() {
   savePersistedSettings();
 }
 
+function syncExerciseFullScaleReferenceFromInput() {
+  if (!exerciseFullScaleReference) {
+    return;
+  }
+
+  exerciseState.playFullScaleReference = Boolean(
+    exerciseFullScaleReference.checked,
+  );
+  savePersistedSettings();
+}
+
 function clearExerciseReview() {
   exerciseState.scaleReview = null;
 }
@@ -1155,6 +1182,9 @@ function updateExercisePresetUi() {
     exerciseState.selectedExercise === 'follow-scale' ||
     exerciseState.selectedExercise === 'random-melody' ||
     exerciseState.selectedExercise === 'random-scale-degree';
+  const usesFullScaleReference =
+    exerciseState.selectedExercise === 'match-scale' ||
+    exerciseState.selectedExercise === 'follow-scale';
 
   if (exerciseType && exerciseType.value !== exerciseState.selectedExercise) {
     exerciseType.value = exerciseState.selectedExercise;
@@ -1191,6 +1221,10 @@ function updateExercisePresetUi() {
 
   if (exerciseScaleDirectionField) {
     exerciseScaleDirectionField.hidden = !isScaleMatch && !isRandomMelody;
+  }
+
+  if (exerciseFullScaleReferenceField) {
+    exerciseFullScaleReferenceField.hidden = !usesFullScaleReference;
   }
 
   if (exerciseRandomTonicField) {
@@ -1579,6 +1613,33 @@ function chooseRandomScaleDegreePrompt() {
 
   const randomIndex = Math.floor(Math.random() * degreeCandidates.length);
   return degreeCandidates[randomIndex];
+}
+
+async function playScaleReferenceSequence(scaleNotes, noteDurationMs = 900) {
+  if (!Array.isArray(scaleNotes) || scaleNotes.length === 0) {
+    return;
+  }
+
+  const sequence = [...scaleNotes];
+  const firstNote = sequence[0];
+  if (firstNote != null && sequence[sequence.length - 1] !== firstNote) {
+    sequence.push(firstNote);
+  }
+
+  for (let index = 0; index < sequence.length; index += 1) {
+    if (
+      !exerciseState.active ||
+      exerciseState.selectedExercise !== 'match-scale'
+    ) {
+      return;
+    }
+
+    await playReferenceToneForDuration(sequence[index], noteDurationMs);
+
+    if (index < sequence.length - 1) {
+      await waitMs(140);
+    }
+  }
 }
 
 async function playReferenceToneForDuration(midi, durationMs = 1200) {
@@ -2378,6 +2439,7 @@ async function startScaleExercise() {
   syncExerciseRangeFromInputs();
   syncExerciseScaleTypeFromInput();
   syncExerciseScaleDirectionFromInput();
+  syncExerciseFullScaleReferenceFromInput();
   syncRandomDegreeUseRandomTonicFromInput();
   syncRandomDegreeFixedTonicFromInput();
 
@@ -2437,7 +2499,11 @@ async function startScaleExercise() {
   setExerciseLiveReadout(null);
 
   setStatus('Scale tonic playing', true);
-  await playReferenceToneForDuration(rootMidi);
+  if (exerciseState.playFullScaleReference) {
+    await playScaleReferenceSequence(scaleNotes);
+  } else {
+    await playReferenceToneForDuration(rootMidi);
+  }
 
   if (
     !exerciseState.active ||
@@ -4516,6 +4582,13 @@ if (exerciseScaleDirection) {
   exerciseScaleDirection.addEventListener(
     'change',
     syncExerciseScaleDirectionFromInput,
+  );
+}
+
+if (exerciseFullScaleReference) {
+  exerciseFullScaleReference.addEventListener(
+    'change',
+    syncExerciseFullScaleReferenceFromInput,
   );
 }
 
