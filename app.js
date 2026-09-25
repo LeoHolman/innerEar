@@ -3026,7 +3026,7 @@ async function startRandomMelodyExercise() {
   setStatus('Random melody listening', true);
 }
 
-function finalizeRandomScaleDegreeAttempt(success) {
+async function finalizeRandomScaleDegreeAttempt(success) {
   const tonicMidi = exerciseState.randomDegreeTonicMidi;
   const degreeNumber = exerciseState.randomDegreeNumber;
   const targetMidi = exerciseState.targetMidi;
@@ -3062,6 +3062,22 @@ function finalizeRandomScaleDegreeAttempt(success) {
   }
 
   setExerciseRevealText(`Degree ${degreeNumber} -> ${targetNote}`);
+
+  if (
+    exerciseState.active &&
+    exerciseState.selectedExercise === 'random-scale-degree' &&
+    tonicMidi != null &&
+    targetMidi != null
+  ) {
+    await playReferenceToneForDuration(tonicMidi, 900);
+    await waitMs(180);
+    if (
+      exerciseState.active &&
+      exerciseState.selectedExercise === 'random-scale-degree'
+    ) {
+      await playReferenceToneForDuration(targetMidi, 900);
+    }
+  }
 }
 
 function updateRandomScaleDegreeExercise(sample) {
@@ -4485,14 +4501,25 @@ async function startAudio() {
     return;
   }
 
+  const AudioCtor = window.AudioContext || window.webkitAudioContext;
+  if (!navigator.mediaDevices?.getUserMedia || !AudioCtor) {
+    setStatus('Mic input unsupported');
+    stabilityLabel.textContent = 'This browser cannot access the microphone';
+    return;
+  }
+
   try {
+    toggleButton.disabled = true;
     setStatus('Requesting microphone...');
     stream = await navigator.mediaDevices.getUserMedia({
       audio: true,
       video: false,
     });
-    audioContext = new AudioContext();
-    await audioContext.resume();
+
+    audioContext = new AudioCtor();
+    if (audioContext.state === 'suspended') {
+      await audioContext.resume();
+    }
 
     analyser = audioContext.createAnalyser();
     analyser.fftSize = 2048;
@@ -4502,10 +4529,19 @@ async function startAudio() {
     sourceNode.connect(analyser);
 
     running = true;
+    toggleButton.disabled = false;
     toggleButton.textContent = 'Stop listening';
     setStatus('Listening', true);
     requestAnimationFrame(updateFromAudio);
   } catch (error) {
+    if (audioContext && audioContext.state === 'suspended') {
+      try {
+        await audioContext.resume();
+      } catch {
+        // Ignore browser-level resume rejection and surface the human-readable state below.
+      }
+    }
+
     setStatus('Mic permission needed');
     currentChip.textContent = 'Allow microphone access to begin';
     noteName.textContent = '--';
@@ -4513,6 +4549,7 @@ async function startAudio() {
     centsLabel.textContent = '--';
     stabilityLabel.textContent = 'Permission blocked';
     meterFill.style.width = '0%';
+    toggleButton.disabled = false;
   }
 }
 
