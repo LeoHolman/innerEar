@@ -1600,8 +1600,8 @@ async function playReferenceToneForDuration(midi, durationMs = 1200) {
   oscillators[2].frequency.setValueAtTime(frequency * 3, now);
 
   mixGain.gain.setValueAtTime(0.0001, now);
-  mixGain.gain.exponentialRampToValueAtTime(0.3, now + 0.02);
-  mixGain.gain.setValueAtTime(0.24, Math.max(now + 0.06, stopAt - 0.18));
+  mixGain.gain.exponentialRampToValueAtTime(0.52, now + 0.02);
+  mixGain.gain.setValueAtTime(0.42, Math.max(now + 0.06, stopAt - 0.18));
   mixGain.gain.exponentialRampToValueAtTime(0.0001, stopAt);
 
   for (let index = 0; index < oscillators.length; index += 1) {
@@ -3381,7 +3381,7 @@ function getReferenceAudioContext() {
 function getReferenceVolumeScalar() {
   const percent = Number(referenceVolume?.value ?? 56);
   const normalized = clamp(percent / 100, 0, 1);
-  return 0.04 + Math.pow(normalized, 1.3) * 0.56;
+  return 0.12 + Math.pow(normalized, 1.15) * 1.08;
 }
 
 function applyReferenceVolume() {
@@ -3463,8 +3463,8 @@ async function startSustainedReferenceTone(midi) {
     gainTwelfth.gain.setValueAtTime(0.14, now);
 
     mixGain.gain.setValueAtTime(0.0001, now);
-    mixGain.gain.exponentialRampToValueAtTime(0.32, now + 0.012);
-    mixGain.gain.exponentialRampToValueAtTime(0.22, now + 0.08);
+    mixGain.gain.exponentialRampToValueAtTime(0.6, now + 0.012);
+    mixGain.gain.exponentialRampToValueAtTime(0.42, now + 0.08);
 
     oscFundamental.type = 'triangle';
     oscFundamental.frequency.setValueAtTime(frequency, now);
