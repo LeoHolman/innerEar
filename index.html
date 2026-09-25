@@ -93,17 +93,31 @@
           >
             Mic idle
           </div>
-          <div class="reference-controls">
-            <label for="referenceVolume">Reference volume</label>
-            <input
-              id="referenceVolume"
-              type="range"
-              min="0"
-              max="100"
-              value="56"
-              step="1"
-            />
-            <span id="referenceVolumeValue">56%</span>
+          <div class="reference-controls-group">
+            <div class="reference-controls">
+              <label for="referenceVolume">Reference volume</label>
+              <input
+                id="referenceVolume"
+                type="range"
+                min="0"
+                max="100"
+                value="56"
+                step="1"
+              />
+              <span id="referenceVolumeValue">56%</span>
+            </div>
+            <div class="reference-controls">
+              <label for="successChimeVolume">Success chime volume</label>
+              <input
+                id="successChimeVolume"
+                type="range"
+                min="0"
+                max="100"
+                value="100"
+                step="1"
+              />
+              <span id="successChimeVolumeValue">100%</span>
+            </div>
           </div>
         </div>
 

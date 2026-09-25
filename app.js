@@ -40,6 +40,10 @@ const stabilityLabel = document.getElementById('stabilityLabel');
 const currentChip = document.getElementById('currentChip');
 const referenceVolume = document.getElementById('referenceVolume');
 const referenceVolumeValue = document.getElementById('referenceVolumeValue');
+const successChimeVolume = document.getElementById('successChimeVolume');
+const successChimeVolumeValue = document.getElementById(
+  'successChimeVolumeValue',
+);
 const exercisePanel = document.getElementById('exercisePanel');
 const exerciseDetails = document.getElementById('exerciseDetails');
 const exerciseType = document.getElementById('exerciseType');
@@ -119,6 +123,7 @@ const context = canvas.getContext('2d');
 let audioContext = null;
 let referenceAudioContext = null;
 let referenceMasterGain = null;
+let successChimeMasterGain = null;
 let activeReferenceVoice = null;
 let analyser = null;
 let sourceNode = null;
@@ -396,6 +401,9 @@ function savePersistedSettings() {
       detailsCollapsed: exerciseState.detailsCollapsed,
       followPitchEnabled,
       referenceVolume: referenceVolume ? Number(referenceVolume.value) : null,
+      successChimeVolume: successChimeVolume
+        ? Number(successChimeVolume.value)
+        : null,
     };
 
     window.localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(payload));
@@ -541,6 +549,13 @@ function loadPersistedSettings() {
       const volume = Number(settings.referenceVolume);
       if (Number.isFinite(volume)) {
         referenceVolume.value = String(Math.round(clamp(volume, 0, 100)));
+      }
+    }
+
+    if (successChimeVolume) {
+      const volume = Number(settings.successChimeVolume);
+      if (Number.isFinite(volume)) {
+        successChimeVolume.value = String(Math.round(clamp(volume, 0, 100)));
       }
     }
   } catch {
@@ -1649,6 +1664,35 @@ async function replayExerciseTone() {
   }
 }
 
+function getSuccessChimeVolumeScalar() {
+  const percent = Number(successChimeVolume?.value ?? 100);
+  const normalized = clamp(percent / 100, 0, 1);
+  if (normalized <= 0) {
+    return 0;
+  }
+
+  return 0.12 + Math.pow(normalized, 1.15) * 1.08;
+}
+
+function applySuccessChimeVolume() {
+  if (!successChimeMasterGain || !referenceAudioContext) {
+    return;
+  }
+
+  const now = referenceAudioContext.currentTime;
+  const target = getSuccessChimeVolumeScalar();
+  successChimeMasterGain.gain.cancelScheduledValues(now);
+  successChimeMasterGain.gain.setTargetAtTime(target, now, 0.02);
+}
+
+function setSuccessChimeVolumeLabel() {
+  if (!successChimeVolumeValue || !successChimeVolume) {
+    return;
+  }
+
+  successChimeVolumeValue.textContent = `${successChimeVolume.value}%`;
+}
+
 function playSuccessDing() {
   try {
     const ctx = getReferenceAudioContext();
@@ -1664,12 +1708,13 @@ function playSuccessDing() {
     osc.frequency.setValueAtTime(1600, now);
     osc.frequency.exponentialRampToValueAtTime(2300, now + 0.12);
 
+    const chimeGainScalar = getSuccessChimeVolumeScalar();
     gain.gain.setValueAtTime(0.0001, now);
-    gain.gain.exponentialRampToValueAtTime(0.2, now + 0.01);
+    gain.gain.exponentialRampToValueAtTime(Math.max(0.0001, chimeGainScalar), now + 0.01);
     gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.17);
 
     osc.connect(gain);
-    gain.connect(referenceMasterGain);
+    gain.connect(successChimeMasterGain || referenceMasterGain || ctx.destination);
     osc.start(now);
     osc.stop(now + 0.18);
 
@@ -1847,6 +1892,9 @@ function finalizePitchMemoryAttempt(success) {
   setExerciseRevealText(revealedNote);
   setExerciseCountdownText('--');
   setStatus(success ? 'Exercise success' : 'Exercise try again', true);
+  if (success) {
+    playSuccessDing();
+  }
   showExerciseToast(
     success ? 'Pitch Memory cleared' : 'Pitch Memory failed',
     success ? 'success' : 'warning',
@@ -2060,6 +2108,7 @@ function finalizeScaleExerciseAttempt(success, failureReason = '') {
       'success',
     );
     setStatus('Exercise success', true);
+    playSuccessDing();
     showExerciseToast('Sing the Scale cleared', 'success');
   } else {
     const reasonText = failureReason
@@ -2475,6 +2524,7 @@ function finalizeFollowScaleExerciseAttempt(success, failureReason = '') {
       'success',
     );
     setStatus('Exercise success', true);
+    playSuccessDing();
     showExerciseToast('Follow the Scale cleared', 'success');
   } else {
     const reasonText = failureReason
@@ -2661,6 +2711,7 @@ function finalizeRandomMelodyAttempt(success, failureReason = '') {
       'success',
     );
     setStatus('Exercise success', true);
+    playSuccessDing();
     showExerciseToast('Random Melody cleared', 'success');
   } else {
     const reasonText = failureReason ? ` ${failureReason}` : '';
@@ -2933,6 +2984,7 @@ function finalizeRandomScaleDegreeAttempt(success) {
       'success',
     );
     setStatus('Exercise success', true);
+    playSuccessDing();
     showExerciseToast('Random Scale Degree cleared', 'success');
   } else {
     setExerciseFeedback(
@@ -3444,7 +3496,10 @@ function getReferenceAudioContext() {
     referenceAudioContext = new AudioContext();
     referenceMasterGain = referenceAudioContext.createGain();
     referenceMasterGain.connect(referenceAudioContext.destination);
+    successChimeMasterGain = referenceAudioContext.createGain();
+    successChimeMasterGain.connect(referenceAudioContext.destination);
     applyReferenceVolume();
+    applySuccessChimeVolume();
   }
 
   return referenceAudioContext;
@@ -4587,6 +4642,15 @@ if (referenceVolume) {
   });
 }
 
+if (successChimeVolume) {
+  setSuccessChimeVolumeLabel();
+  successChimeVolume.addEventListener('input', () => {
+    setSuccessChimeVolumeLabel();
+    applySuccessChimeVolume();
+    savePersistedSettings();
+  });
+}
+
 window.addEventListener('resize', () => {
   resizeCanvas();
 });
@@ -4599,6 +4663,7 @@ populateExerciseRangeOptions();
 populateRandomDegreeFixedTonicOptions();
 applyExerciseStateToInputs();
 setReferenceVolumeLabel();
+setSuccessChimeVolumeLabel();
 syncExerciseMemoryDelayFromInput();
 syncExerciseGradingFromInput();
 syncExerciseHintsFromInput();
