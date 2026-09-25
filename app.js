@@ -271,6 +271,7 @@ const exerciseState = {
   followScaleAdvanceTimerId: null,
   memoryTimerId: null,
   memoryCountdownIntervalId: null,
+  memoryToastIntervalId: null,
   memoryCountdownHideTimerId: null,
   memoryEvaluationEndTime: null,
   holdStartTime: null,
@@ -948,6 +949,11 @@ function clearExerciseTimers() {
   if (exerciseState.memoryCountdownIntervalId != null) {
     window.clearInterval(exerciseState.memoryCountdownIntervalId);
     exerciseState.memoryCountdownIntervalId = null;
+  }
+
+  if (exerciseState.memoryToastIntervalId != null) {
+    window.clearInterval(exerciseState.memoryToastIntervalId);
+    exerciseState.memoryToastIntervalId = null;
   }
 
   if (exerciseState.memoryCountdownHideTimerId != null) {
@@ -1847,6 +1853,19 @@ function finalizePitchMemoryAttempt(success) {
   );
 }
 
+function showPitchMemoryToastCountdown(secondsRemaining) {
+  const remainingSeconds = Math.max(0, Math.ceil(secondsRemaining));
+
+  if (remainingSeconds <= 0) {
+    showExerciseToast('Sing now!', 'neutral');
+    return;
+  }
+
+  const label =
+    remainingSeconds === 1 ? '1 second until you sing' : `${remainingSeconds} seconds until you sing`;
+  showExerciseToast(label, 'neutral');
+}
+
 function beginPitchMemorySingWindow() {
   if (
     !exerciseState.active ||
@@ -1888,13 +1907,15 @@ function beginPitchMemorySingWindow() {
 function startPitchMemoryCountdown() {
   if (
     !exerciseState.active ||
-    exerciseState.selectedExercise !== 'pitch-memory'
+    exerciseState.selectedExercise !== 'pitch-memory' ||
+    exerciseState.phase === 'memory-countdown'
   ) {
     return;
   }
 
   exerciseState.phase = 'memory-countdown';
-  let countdownValue = EXERCISE_MEMORY_COUNTDOWN_SECONDS;
+  let countdownValue = Math.max(1, exerciseState.memoryDelaySeconds);
+  showPitchMemoryToastCountdown(countdownValue);
   setExerciseCountdownText(String(countdownValue));
   setExerciseAttemptText('Get ready');
   setExercisePhaseText('Countdown');
@@ -1906,9 +1927,11 @@ function startPitchMemoryCountdown() {
 
     if (countdownValue > 0) {
       setExerciseCountdownText(String(countdownValue));
+      showPitchMemoryToastCountdown(countdownValue);
       return;
     }
 
+    showPitchMemoryToastCountdown(0);
     clearExerciseTimers();
     beginPitchMemorySingWindow();
   }, 1000);
@@ -1955,30 +1978,39 @@ async function startPitchMemoryExercise() {
     return;
   }
 
-  const preCountdownDelayMs = Math.max(
-    0,
-    (exerciseState.memoryDelaySeconds - EXERCISE_MEMORY_COUNTDOWN_SECONDS) *
-      1000,
-  );
-
-  if (preCountdownDelayMs <= 0) {
-    startPitchMemoryCountdown();
-    return;
-  }
-
   exerciseState.phase = 'memory-wait';
   setExerciseAttemptText('Waiting for countdown');
   setExercisePhaseText('Memory hold');
   setExerciseFeedback(
-    'Hold the tone in memory. Countdown starts soon.',
+    'Hold the tone in memory. Countdown starts now.',
     'neutral',
   );
   setStatus('Pitch memory: waiting', true);
 
-  exerciseState.memoryTimerId = window.setTimeout(() => {
-    startPitchMemoryCountdown();
-  }, preCountdownDelayMs);
+  let countdownValue = Math.max(1, exerciseState.memoryDelaySeconds);
+  showPitchMemoryToastCountdown(countdownValue);
+  setExerciseCountdownText(String(countdownValue));
+
+  exerciseState.memoryCountdownIntervalId = window.setInterval(() => {
+    countdownValue -= 1;
+
+    if (countdownValue > 0) {
+      setExerciseCountdownText(String(countdownValue));
+      showPitchMemoryToastCountdown(countdownValue);
+      return;
+    }
+
+    if (exerciseState.memoryCountdownIntervalId != null) {
+      window.clearInterval(exerciseState.memoryCountdownIntervalId);
+      exerciseState.memoryCountdownIntervalId = null;
+    }
+
+    showPitchMemoryToastCountdown(0);
+    clearExerciseTimers();
+    beginPitchMemorySingWindow();
+  }, 1000);
 }
+
 
 function finalizeScaleExerciseAttempt(success, failureReason = '') {
   const scaleNotes = [...exerciseState.scaleNotes];
